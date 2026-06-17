@@ -39,7 +39,7 @@ static void handle_exception(int exception, StackFrame *frame) {
 		// Cambio el dígito del contador
 		message_buffer[number_index] = counter + '0';
 		
-		drawString(message_buffer, 2*8, getScreenHeight()/2, 0xFFFFFF, bgColor, 2);
+		drawString((unsigned char *)message_buffer, 2*8, getScreenHeight()/2, 0xFFFFFF, bgColor, 2);
 		sleep(1000);
 	}
 }

@@ -1,14 +1,18 @@
-#Binary Files
+*.o
 *.bin
 *.sys
-
-#The images
-*.img
 *.qcow2
+*.img
 *.vmdk
+*.iso
 
-#Object files
-*.o
+Bootloader/Pure64/pure64.sys
+Image/x64BareBonesImage.*
 
-#vscode
-.vscode
+.DS_Store
+*.swp
+*.swo
+*~
+*:Zone.Identifier
+.vscode/
+.idea/

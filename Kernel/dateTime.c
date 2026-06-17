@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <lib.h>
 #include <dateTime.h>
 
 // Funcion auxiliar para convertir BCD a decimal

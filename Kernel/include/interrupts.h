@@ -27,6 +27,9 @@ void _sti(void);
 
 void _hlt(void);
 
+//Fuerza una invocación al scheduler por software (yield / exit).
+void _forceTimerInt(void);
+
 void picMasterMask(uint8_t mask);
 
 void picSlaveMask(uint8_t mask);

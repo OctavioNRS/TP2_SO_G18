@@ -5,6 +5,7 @@ GLOBAL picMasterMask
 GLOBAL picSlaveMask
 GLOBAL haltcpu
 GLOBAL _hlt
+GLOBAL _forceTimerInt
 
 GLOBAL _irq00Handler
 GLOBAL _irq01Handler
@@ -20,6 +21,7 @@ GLOBAL _exception6Handler
 EXTERN irqDispatcher
 EXTERN syscallDispatcher
 EXTERN exceptionDispatcher
+EXTERN schedule
 EXTERN main
 EXTERN readPort
 EXTERN createRegisterSnapshot
@@ -129,9 +131,20 @@ picSlaveMask:
     retn
 
 
-;8254 Timer (Timer Tick)
+;8254 Timer (Timer Tick) — realiza el cambio de contexto (scheduler)
 _irq00Handler:
-	irqHandlerMaster 0
+	pushState
+
+	mov rdi, rsp        ; rdi = stack del proceso saliente
+	call schedule       ; rax = stack del proceso entrante
+	mov rsp, rax        ; cambio de contexto
+
+	; signal pic EOI (End of Interrupt)
+	mov al, 20h
+	out 20h, al
+
+	popState
+	iretq
 
 ;Keyboard
 _irq01Handler:
@@ -160,6 +173,12 @@ _irq05Handler:
 ;System Call
 _syscall:
 	syscallHandler
+
+
+; Fuerza una invocación al scheduler por software (yield / exit)
+_forceTimerInt:
+	int 20h
+	ret
 
 
 ;Zero Division Exception

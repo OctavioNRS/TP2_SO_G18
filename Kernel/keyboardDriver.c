@@ -148,7 +148,7 @@ char getKeyPress(uint8_t scancode) {
     
     // Convierto el scancode a ASCII
     if (normalizedCode < sizeof(scancodeToAscii)) {
-        char *asciiMap = shift(normalizedCode) ? shiftedScancodeToAscii : scancodeToAscii;
+        const char *asciiMap = shift(normalizedCode) ? shiftedScancodeToAscii : scancodeToAscii;
         return asciiMap[normalizedCode];
     }
     if (normalizedCode >= KEYCODE_SHIFT) {

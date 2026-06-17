@@ -5,30 +5,11 @@
 #include <soundDriver.h>
 #include <dateTime.h>
 #include <registers.h>
+#include <memoryManager.h>
+#include <scheduler.h>
+#include <process.h>
 
 #define SYSCALL_ARGS uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6
-
-/*
-enum SyscallNumber {
-    SYS_READ = 0,
-    SYS_WRITE,
-    SYS_DRAW_RECT,
-    SYS_DRAW_CIRCLE,
-    SYS_DRAW_CHAR,
-    SYS_SCREEN_WIDTH,
-    SYS_SCREEN_HEIGHT,
-    SYS_BACKGROUND,
-    SYS_VIDEO_AUX,
-    SYS_RENDER_AUX,
-    SYS_SLEEP,
-    SYS_DRAW_STRING,
-    SYS_GET_KEY,
-    SYS_PLAY_SOUND,
-    SYS_DATE,
-    SYS_TIME,
-    SYS_PRINT_REGISTERS
-};
-*/
 
 typedef uint64_t (*syscallFunction)(uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t);
 
@@ -91,10 +72,11 @@ uint64_t sysPlaySound(SYSCALL_ARGS) {
 }
 uint64_t sysDate(SYSCALL_ARGS) {
     getCurrentDate((uint8_t*)arg1, (uint8_t*)arg2, (uint8_t*)arg3, (uint8_t*)arg4); // weekday, day, month, year
+    getCurrentDate((uint8_t*)arg1, (uint8_t*)arg2, (uint8_t*)arg3, (uint8_t*)arg4);
     return 0;
 }
 uint64_t sysTime(SYSCALL_ARGS) {
-    getCurrentTime((uint8_t*)arg1, (uint8_t*)arg2, (uint8_t*)arg3); // hours, minutes, seconds
+    getCurrentTime((uint8_t*)arg1, (uint8_t*)arg2, (uint8_t*)arg3);
     return 0;
 }
 uint64_t sysKernelTime(SYSCALL_ARGS) {
@@ -104,10 +86,56 @@ uint64_t sysRegisters(SYSCALL_ARGS) {
     return printSnapshot();
 }
 
-static syscallFunction syscalls[] = {sysRead,sysWrite,sysDrawRect,sysDrawCircle,sysDrawChar,sysScrWidth,sysScrHeight,sysBg,sysVideoAux,sysRender,sysSleep,sysDrawStr,sysGetKey,sysPlaySound,sysDate,sysTime,sysKernelTime,sysRegisters};
+uint64_t sysMalloc(SYSCALL_ARGS) {
+    return (uint64_t) mem_alloc(arg1);
+}
+uint64_t sysFree(SYSCALL_ARGS) {
+    mem_free((void *)arg1);
+    return 0;
+}
+uint64_t sysMemStatus(SYSCALL_ARGS) {
+    mem_status((MemoryInfo *)arg1);
+    return 0;
+}
+
+uint64_t sysGetpid(SYSCALL_ARGS) {
+    return getpid();
+}
+uint64_t sysCreateProcess(SYSCALL_ARGS) {
+    return (uint64_t)(int64_t) createProcess((ProcessEntry)arg1, (int)arg2, (char **)arg3, (const char *)arg4);
+}
+uint64_t sysKill(SYSCALL_ARGS) {
+    return (uint64_t)(int64_t) killProcess((uint32_t)arg1);
+}
+uint64_t sysNice(SYSCALL_ARGS) {
+    return (uint64_t)(int64_t) setPriority((uint32_t)arg1, (uint8_t)arg2);
+}
+uint64_t sysBlock(SYSCALL_ARGS) {
+    return (uint64_t)(int64_t) toggleBlock((uint32_t)arg1);
+}
+uint64_t sysYield(SYSCALL_ARGS) {
+    yield();
+    return 0;
+}
+uint64_t sysWaitpid(SYSCALL_ARGS) {
+    return (uint64_t)(int64_t) waitpid((uint32_t)arg1);
+}
+uint64_t sysPs(SYSCALL_ARGS) {
+    return (uint64_t) listProcesses((ProcessInfo *)arg1, (int)arg2);
+}
+
+static syscallFunction syscalls[] = {
+    sysRead, sysWrite, sysDrawRect, sysDrawCircle, sysDrawChar, sysScrWidth, sysScrHeight,
+    sysBg, sysVideoAux, sysRender, sysSleep, sysDrawStr, sysGetKey, sysPlaySound, sysDate,
+    sysTime, sysKernelTime, sysRegisters,
+    sysMalloc, sysFree, sysMemStatus,
+    sysGetpid, sysCreateProcess, sysKill, sysNice, sysBlock, sysYield, sysWaitpid, sysPs
+};
+
+#define SYSCALL_COUNT (sizeof(syscalls) / sizeof(syscalls[0]))
 
 uint64_t syscallDispatcher(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t syscallNumber) {
-    if (syscallNumber < 18) {
+    if (syscallNumber < SYSCALL_COUNT) {
         return syscalls[syscallNumber](arg1,arg2,arg3,arg4,arg5,arg6);
     }
     return 0;
