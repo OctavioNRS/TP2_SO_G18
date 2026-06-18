@@ -88,8 +88,8 @@ void uint64ToHex(uint64_t value, char *buffer) {
 }
 
 // Función helper para obtener la longitud de una cadena de caracteres
-int strlen(const char *str) {
-    int len = 0;
+uint64_t strlen(const char *str) {
+    uint64_t len = 0;
     while (str[len]) len++;
     return len;
 }

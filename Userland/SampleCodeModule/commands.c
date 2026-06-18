@@ -1,9 +1,9 @@
 #include <shell.h>
 #include <commands.h>
 #include <cstandard.h>
-#include <minigolf.h>
 #include <hexColors.h>
 #include <music.h>
+#include <tests.h>
 
 // Definir mayor o igual que MAX_COMMAND_LENGTH!!
 #define MAX_TOKEN_LENGTH MAX_COMMAND_LENGTH
@@ -41,10 +41,18 @@ static void helpCommand(char **args, int argCount) {
     puts("color <b|f|h> <color> - Sets the (b)ackground, (f)oreground or (h)ighlight color");
     puts("scale <factor> - Sets the screen text size");
     puts("datetime - Displays current date and time");
-    puts("minigolf - Starts a game of minigolf");
     puts("ls - Display the files in the current directory");
     puts("registers - Print the last snapshot of the CPU registers (Take one with F6)");
-    puts("music <song> - Plays one of the available songs in our library.\nAvailable Songs:\n- r: Rickroll Intro\n- c: Coffin Dance");
+    puts("music <song> - Plays one of the available songs in our library (r: Rickroll Intro c: Coffin Dance)");
+    puts("ps                          - Lista de procesos");
+    puts("mem                         - Estado del heap");
+    puts("kill <pid>                  - Mata un proceso");
+    puts("nice <pid> <priority>       - Cambia la prioridad de un proceso");
+    puts("block <pid>                 - Bloquea/desbloquea un proceso (toggle)");
+
+    puts("test_mm <max_memory_bytes>  - Stress del memory manager (tecla para terminar)");
+    puts("test_proc <max_processes>   - Stress de procesos crear/bloquear/matar");
+    puts("test_prio <max_value>       - Tres procesos con prioridades distintas");
     putChar('\n');
     puts("Exception tests (will crash the shell)\n");
     puts("zero - Divide by 0");
@@ -101,15 +109,6 @@ static void datetimeCommand(char **args, int argCount) {
     printf("%d:%d:%d %s %d/%d/%d\n",hour,minute,second,weekdays[weekday-1],day,month,year);
 }
 
-static void minigolfCommand(char **args, int argCount) {
-    int mode = 0;
-    if (argCount > 1) {
-        if (strcmp(args[1],"ice") == 0) mode = 1;
-    }
-    initializeMinigolf(mode);
-    clearScreen();
-}
-
 static void scaleCommand(char **args, int argCount) {
     int scale = stringToInt(args[1]);
     if (argCount < 2 || scale <= 0) {
@@ -127,7 +126,10 @@ static void registerCommand(char **args, int argCount) {
 }
 
 static void testDivideByZero(char **args, int argCount) {
-    int a = argCount/0;
+    /* `volatile` evita el warning de constant division by zero; la #DE ocurre en runtime. */
+    volatile int zero = 0;
+    volatile int a = argCount / zero;
+    (void)a;
 }
 
 static void testInvalidOpcode(char **args, int argCount) {
@@ -138,6 +140,112 @@ static void rickrollCommand(char **args, int argCount) {
     sys_write(STDERR, "Of course there is no file system\n", 34);
     printOutput();
     play_song(get_rickroll_song());
+}
+
+/* ---------- Comandos del scheduler/memoria (Parte 3) ---------- */
+
+static const char *stateName(ProcState s) {
+    switch (s) {
+        case ST_READY:   return "READY";
+        case ST_RUNNING: return "RUNNING";
+        case ST_BLOCKED: return "BLOCKED";
+        case ST_ZOMBIE:  return "ZOMBIE";
+        default:         return "?";
+    }
+}
+
+#define PS_MAX_PROCS 64
+
+static void psCommand(char **args, int argCount) {
+    ProcessInfo procs[PS_MAX_PROCS];
+    int n = (int) sys_ps(procs, PS_MAX_PROCS);
+    printf("PID  PPID  PRIO  STATE    NAME\n");
+    for (int i = 0; i < n; i++) {
+        printf("%d    %d     %d     %s",
+               (int)procs[i].pid, (int)procs[i].ppid,
+               (int)procs[i].priority, stateName(procs[i].state));
+        /* Espacios para alinear el nombre con la columna STATE de ancho ~8 */
+        const char *st = stateName(procs[i].state);
+        int slen = 0; while (st[slen]) slen++;
+        for (int j = slen; j < 8; j++) putChar(' ');
+        printf(" %s\n", procs[i].name);
+    }
+    printOutput();
+}
+
+static void memCommand(char **args, int argCount) {
+    MemoryInfo m;
+    sys_mem_status(&m);
+    printf("Memoria (bytes):\n");
+    printf("  total    : %d\n", (int)m.total);
+    printf("  ocupada  : %d\n", (int)m.occupied);
+    printf("  libre    : %d\n", (int)m.free);
+    printf("  fragments: %d\n", (int)m.fragments);
+    printOutput();
+}
+
+static void killCommand(char **args, int argCount) {
+    if (argCount < 2) {
+        sys_write(STDERR, "Usage: kill <pid>\n", 18);
+        return;
+    }
+    int64_t pid = stringToInt(args[1]);
+    if (pid < 0) {
+        sys_write(STDERR, "kill: pid invalido\n", 19);
+        printOutput();
+        return;
+    }
+    if (sys_kill((int16_t)pid) < 0) {
+        printf("kill: no se pudo matar al pid %d\n", (int)pid);
+        printOutput();
+        return;
+    }
+    printf("kill: pid %d terminado\n", (int)pid);
+    printOutput();
+}
+
+static void niceCommand(char **args, int argCount) {
+    if (argCount < 3) {
+        sys_write(STDERR, "Usage: nice <pid> <priority>\n", 29);
+        return;
+    }
+    int64_t pid = stringToInt(args[1]);
+    int64_t prio = stringToInt(args[2]);
+    if (pid < 0 || prio < 1) {
+        sys_write(STDERR, "nice: argumentos invalidos (priority >= 1)\n", 43);
+        printOutput();
+        return;
+    }
+    if (sys_nice((int16_t)pid, (uint8_t)prio) < 0) {
+        printf("nice: no se pudo cambiar la prioridad del pid %d\n", (int)pid);
+        printOutput();
+        return;
+    }
+    printf("nice: pid %d -> prioridad %d\n", (int)pid, (int)prio);
+    printOutput();
+}
+
+/* block: toggle. Intenta bloquear primero; si falla (probablemente porque el proceso ya
+ * está BLOCKED), intenta desbloquearlo. Si ambas syscalls fallan, reporta error. */
+static void blockCommand(char **args, int argCount) {
+    if (argCount < 2) {
+        sys_write(STDERR, "Usage: block <pid>\n", 19);
+        return;
+    }
+    int64_t pid = stringToInt(args[1]);
+    if (pid < 0) {
+        sys_write(STDERR, "block: pid invalido\n", 20);
+        printOutput();
+        return;
+    }
+    if (sys_block((int16_t)pid) == 0) {
+        printf("block: pid %d bloqueado\n", (int)pid);
+    } else if (sys_unblock((int16_t)pid) == 0) {
+        printf("block: pid %d desbloqueado\n", (int)pid);
+    } else {
+        printf("block: no se pudo (pid %d)\n", (int)pid);
+    }
+    printOutput();
 }
 
 static void musicCommand(char **args, int argCount) {
@@ -173,13 +281,22 @@ static CommandEntry validCommands[] = {
     {"help", helpCommand},
     {"color", colorCommand},
     {"datetime", datetimeCommand},
-    {"minigolf", minigolfCommand},
     {"scale", scaleCommand},
     {"registers", registerCommand},
     {"zero", testDivideByZero},
     {"invalid", testInvalidOpcode},
     {"ls", rickrollCommand},
-    {"music", musicCommand}
+    {"music", musicCommand},
+    /* Scheduler / memoria */
+    {"ps",      psCommand},
+    {"mem",     memCommand},
+    {"kill",    killCommand},
+    {"nice",    niceCommand},
+    {"block",   blockCommand},
+    /* Tests */
+    {"test_mm",   test_mm_command},
+    {"test_proc", test_proc_command},
+    {"test_prio", test_prio_command}
 };
 
 static int getCommandIndex(char *commandName)

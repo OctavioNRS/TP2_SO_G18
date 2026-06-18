@@ -8,6 +8,31 @@ enum FileDescriptor {
     STDERR = 2
 };
 
+/* Estados de proceso*/
+typedef enum { ST_READY = 0, ST_RUNNING, ST_BLOCKED, ST_ZOMBIE } ProcState;
+
+/* Punto de entrada de un proceso de usuario*/
+typedef int (*ProcessEntry)(int argc, char **argv);
+
+/* Snapshot de un proceso*/
+typedef struct {
+    int16_t   pid;
+    int16_t   ppid;
+    ProcState state;
+    char     *name;
+    uint8_t   priority;
+    uint64_t *rsp;
+    uint64_t *stackBase;
+} ProcessInfo;
+
+/* Estado de la memoria*/
+typedef struct {
+    uint64_t total;
+    uint64_t occupied;
+    uint64_t free;
+    uint64_t fragments;
+} MemoryInfo;
+
 uint64_t sys_read(int fd, char* buffer, uint64_t count);
 uint64_t sys_write(int fd, char* buffer, uint64_t count);
 uint64_t sys_draw_rect(uint64_t color, uint64_t x, uint64_t y, uint64_t width, uint64_t height);
@@ -26,6 +51,21 @@ uint64_t sys_date(uint8_t *weekday, uint8_t *day, uint8_t *month, uint8_t *year)
 uint64_t sys_time(uint8_t *hours, uint8_t *minutes, uint8_t *seconds);
 uint64_t sys_kernel_time();
 uint64_t sys_print_registers();
+
+void*    sys_malloc(uint64_t size);
+uint64_t sys_free(void *ptr);
+uint64_t sys_mem_status(MemoryInfo *info);
+
+int16_t  sys_getpid();
+int64_t  sys_create_process(ProcessEntry entry, int argc, char **argv, char *name);
+int64_t  sys_kill(int16_t pid);
+int64_t  sys_nice(int16_t pid, uint8_t priority);
+int64_t  sys_block(int16_t pid);    /* solo bloquea (READY/RUNNING -> BLOCKED) */
+int64_t  sys_unblock(int16_t pid);  /* solo desbloquea (BLOCKED -> READY)      */
+int64_t  sys_yield();
+int64_t  sys_waitpid(int16_t pid);
+uint64_t sys_ps(ProcessInfo *buffer, int max);
+void     sys_exit();
 
 void test_invalid_opcode();
 

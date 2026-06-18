@@ -62,7 +62,7 @@ int withinScreenBounds(uint64_t x, uint64_t y) {
 }
 
 uint8_t *getFrameBuffer() {
-    if (auxFramebuffer == 0) return (uint8_t *) VBE_mode_info->framebuffer;
+    if (auxFramebuffer == 0) return (uint8_t *)(uint64_t) VBE_mode_info->framebuffer;
     return auxFramebuffer;
 }
 
@@ -79,7 +79,7 @@ void setAuxFramebuffer(uint8_t *buffer, uint32_t width, uint32_t height) {
 void renderAux() {
     if (auxFramebuffer == 0) return;
     
-    uint8_t *framebuffer = (uint8_t *) VBE_mode_info->framebuffer;
+    uint8_t *framebuffer = (uint8_t *)(uint64_t) VBE_mode_info->framebuffer;
     uint64_t copyWidth = auxBuffWidth < VBE_mode_info->width ? auxBuffWidth : VBE_mode_info->width;
     uint64_t copyHeight = auxBuffHeight < VBE_mode_info->height ? auxBuffHeight : VBE_mode_info->height;
     

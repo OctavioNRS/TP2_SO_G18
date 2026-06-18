@@ -48,6 +48,18 @@ void * initializeKernelBinary()
 	return getStackBase();
 }
 
+/*
+ * Proceso init (PID 1).
+ */
+static int initProcessEntry(int argc, char **argv)
+{
+	(void)argc; (void)argv;
+	while (1) {
+		wait_any();
+	}
+	return 0;
+}
+
 int main()
 {
 	load_idt();          /* configura IDT + PIC y habilita interrupciones (_sti) */
@@ -55,9 +67,11 @@ int main()
 
 	mem_init((void *)MEM_HEAP_START, MEM_HEAP_SIZE);
 
-	initScheduler();
-	/* El primer (y único) proceso de userland es el módulo cargado en 0x400000. */
-	createProcess((ProcessEntry)sampleCodeModuleAddress, 0, 0, "userland");
+	/* initializeScheduler crea idle (PID 0) y el proceso init (PID 1). */
+	initializeScheduler(initProcessEntry);
+
+	/* El primer proceso de userland: el módulo cargado en 0x400000. */
+	startNewProcess((ProcessEntryPoint)sampleCodeModuleAddress, "userland", 1, 0, 0);
 
 	enableScheduler();   /* habilita el cambio de contexto recién ahora */
 	_sti();              /* el primer tick del timer arranca el scheduling */

@@ -99,29 +99,48 @@ uint64_t sysMemStatus(SYSCALL_ARGS) {
 }
 
 uint64_t sysGetpid(SYSCALL_ARGS) {
-    return getpid();
+    return getCurrentPID();
 }
 uint64_t sysCreateProcess(SYSCALL_ARGS) {
-    return (uint64_t)(int64_t) createProcess((ProcessEntry)arg1, (int)arg2, (char **)arg3, (const char *)arg4);
+    return startNewProcess((ProcessEntryPoint)arg1, (char *)arg4, 1,
+                             (int)arg2, (char **)arg3);
 }
 uint64_t sysKill(SYSCALL_ARGS) {
-    return (uint64_t)(int64_t) killProcess((uint32_t)arg1);
+    return terminateProcess((pid_t)arg1);
 }
 uint64_t sysNice(SYSCALL_ARGS) {
-    return (uint64_t)(int64_t) setPriority((uint32_t)arg1, (uint8_t)arg2);
+    return setPriorityOnPID((pid_t)arg1, (uint8_t)arg2);
 }
+/* sys_block: solo bloquea un proceso (READY/RUNNING -> BLOCKED). */
 uint64_t sysBlock(SYSCALL_ARGS) {
-    return (uint64_t)(int64_t) toggleBlock((uint32_t)arg1);
+    return (uint64_t)(int64_t) setBlocked((pid_t)arg1);
+}
+/* sys_unblock: solo desbloquea un proceso (BLOCKED -> READY).
+ * Rechaza idle e init: si un usuario los desbloqueara, los sacaríamos de su semWait
+ * interno (el sem `childTerminated` de init) y romperíamos la sincronización del kernel. */
+uint64_t sysUnblock(SYSCALL_ARGS) {
+    pid_t pid = (pid_t)arg1;
+    if (pid == IDLE_PID || pid == INIT_PID) return (uint64_t)(int64_t)-1;
+    return (uint64_t)(int64_t) setReady(pid);
 }
 uint64_t sysYield(SYSCALL_ARGS) {
-    yield();
+    forceSchedulerCall();
     return 0;
 }
 uint64_t sysWaitpid(SYSCALL_ARGS) {
-    return (uint64_t)(int64_t) waitpid((uint32_t)arg1);
+    wait_pid((pid_t)arg1);
+    return 0;
 }
 uint64_t sysPs(SYSCALL_ARGS) {
-    return (uint64_t) listProcesses((ProcessInfo *)arg1, (int)arg2);
+    return (uint64_t) getProcessInfo((ProcessInfo *)arg1, (int)arg2);
+}
+/* Termina el proceso actual. El código de usuario debe llamarla antes de retornar de
+ * su entry; si no lo hace, el comportamiento es indefinido (el RIP queda apuntando a
+ * memoria que sigue a la última instrucción del entry, que es lo que sea). */
+uint64_t sysExit(SYSCALL_ARGS) {
+    terminateProcess(getCurrentPID());
+    while (1) ;   /* defensa: no se debería volver */
+    return 0;
 }
 
 static syscallFunction syscalls[] = {
@@ -129,7 +148,8 @@ static syscallFunction syscalls[] = {
     sysBg, sysVideoAux, sysRender, sysSleep, sysDrawStr, sysGetKey, sysPlaySound, sysDate,
     sysTime, sysKernelTime, sysRegisters,
     sysMalloc, sysFree, sysMemStatus,
-    sysGetpid, sysCreateProcess, sysKill, sysNice, sysBlock, sysYield, sysWaitpid, sysPs
+    sysGetpid, sysCreateProcess, sysKill, sysNice, sysBlock, sysYield, sysWaitpid, sysPs,
+    sysExit, sysUnblock
 };
 
 #define SYSCALL_COUNT (sizeof(syscalls) / sizeof(syscalls[0]))

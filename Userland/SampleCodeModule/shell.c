@@ -208,7 +208,7 @@ static void print(char *str) {
 
 #define MAX_SAVED_COMMANDS 16
 
-static char *shellPrompt = "[ARQ-SHELL] > ";
+static char *shellPrompt = "[SHELL] > ";
 
 static char commandHistory[MAX_SAVED_COMMANDS][MAX_COMMAND_LENGTH+1] = {0};
 static int saveIndex = 0;
@@ -368,7 +368,7 @@ static void shellLoop() {
 static void drawTitle() {
     uint64_t textWidth = CHAR_WIDTH * 28 * 2;
     uint64_t bottomLeftX = screenWidth/2 - textWidth/2;
-    sys_draw_string("Arquitectura de Computadoras",bottomLeftX,36,GREEN,-1,2);
+    sys_draw_string("Sistemas Operativos",bottomLeftX,36,GREEN,-1,2);
 }
 
 void initializeShell() {
