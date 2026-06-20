@@ -1,4 +1,4 @@
-# TP2 — 72.11 Sistemas Operativos — 2C 2025
+# TP2 — 72.11 Sistemas Operativos — 1C 2026
 
 Implementación de un sistema operativo monolítico de 64 bits sobre x64BareBones
 (Pure64). El kernel administra interrupciones, system calls, drivers de teclado y
