@@ -3,29 +3,26 @@
 #include <stdint.h>
 
 enum FileDescriptor {
-    STDIN = 0,
+    STDIN  = 0,
     STDOUT = 1,
     STDERR = 2
 };
 
-/* Estados de proceso*/
 typedef enum { ST_READY = 0, ST_RUNNING, ST_BLOCKED, ST_ZOMBIE } ProcState;
 
-/* Punto de entrada de un proceso de usuario*/
 typedef int (*ProcessEntry)(int argc, char **argv);
 
-/* Snapshot de un proceso*/
 typedef struct {
     int16_t   pid;
     int16_t   ppid;
     ProcState state;
     char     *name;
     uint8_t   priority;
+    uint8_t   inForeground;
     uint64_t *rsp;
     uint64_t *stackBase;
 } ProcessInfo;
 
-/* Estado de la memoria*/
 typedef struct {
     uint64_t total;
     uint64_t occupied;
@@ -33,8 +30,13 @@ typedef struct {
     uint64_t fragments;
 } MemoryInfo;
 
+typedef struct {
+    int affectedFd;
+    int targetFd;
+} fd_override_t;
+
 uint64_t sys_read(int fd, char* buffer, uint64_t count);
-uint64_t sys_write(int fd, char* buffer, uint64_t count);
+uint64_t sys_write(int fd, const char* buffer, uint64_t count);
 uint64_t sys_draw_rect(uint64_t color, uint64_t x, uint64_t y, uint64_t width, uint64_t height);
 uint64_t sys_draw_circle(uint64_t color, uint64_t centerX, uint64_t centerY, uint64_t radius, uint64_t fill);
 uint64_t sys_draw_char(unsigned char c, uint64_t x, uint64_t y, uint64_t fgColor, uint64_t bgColor, int scale);
@@ -60,12 +62,28 @@ int16_t  sys_getpid();
 int64_t  sys_create_process(ProcessEntry entry, int argc, char **argv, char *name);
 int64_t  sys_kill(int16_t pid);
 int64_t  sys_nice(int16_t pid, uint8_t priority);
-int64_t  sys_block(int16_t pid);    /* solo bloquea (READY/RUNNING -> BLOCKED) */
-int64_t  sys_unblock(int16_t pid);  /* solo desbloquea (BLOCKED -> READY)      */
+int64_t  sys_block(int16_t pid);
+int64_t  sys_unblock(int16_t pid);
 int64_t  sys_yield();
 int64_t  sys_waitpid(int16_t pid);
 uint64_t sys_ps(ProcessInfo *buffer, int max);
 void     sys_exit();
+
+int64_t  sys_sem_open(char *name, int initialValue);
+int64_t  sys_sem_close(char *name);
+int64_t  sys_sem_wait(char *name);
+int64_t  sys_sem_post(char *name);
+
+int64_t  sys_pipe(int fds[2]);
+int64_t  sys_close(int fd);
+int64_t  sys_dup(int oldFd, int newFd);
+int64_t  sys_create_process_with_fds(ProcessEntry entry, int argc, char **argv, char *name,
+                                     fd_override_t *overrides, int overrideCount);
+int64_t  sys_foreground(int16_t pid);
+int64_t  sys_reopen(int fd);
+uint64_t sys_scroll_up(uint64_t pixelRows, uint32_t fillColor);
+
+void     sys_reap_zombies(void);
 
 void test_invalid_opcode();
 

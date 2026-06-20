@@ -1,15 +1,14 @@
 /*
  * TAD Semaforo.
+ *
+ * Atomicidad por spinlock (test-and-set atómico con __atomic_exchange_n)
  */
 #include <semaphore.h>
 #include <memoryManager.h>
 #include <queue.h>
 #include <scheduler.h>
-#include <interrupts.h>   /* _cli, _sti */
 #include <stdint.h>
 
-/* Spinlock atómico con builtins de GCC. Implementado como macros para garantizar
- * inlinación en -O0 (sin esto el compilador deja referencias externas no resueltas). */
 #define ACQUIRE(lock_ptr) \
     while (__atomic_exchange_n((lock_ptr), (uint8_t)1, __ATOMIC_ACQUIRE)) { }
 #define RELEASE(lock_ptr) \
@@ -34,7 +33,6 @@ Semaphore newSemaphore(int value) {
 int semWait(Semaphore sem) {
     if (!sem) return -1;
 
-    _cli();
     ACQUIRE(&sem->lock);
     sem->value--;
     int mustBlock = (sem->value < 0);
@@ -44,7 +42,6 @@ int semWait(Semaphore sem) {
         enqueue(sem->blockedQueue, (void*)(intptr_t)currentPID);
     }
     RELEASE(&sem->lock);
-    _sti();
 
     if (mustBlock) forceSchedulerCall();   /* cede ya bloqueado */
     return 0;
@@ -53,29 +50,37 @@ int semWait(Semaphore sem) {
 int semPost(Semaphore sem) {
     if (!sem) return -1;
 
-    _cli();
     ACQUIRE(&sem->lock);
     sem->value++;
-    if (sem->value <= 0) {
+    while (sem->value <= 0 && !isQueueEmpty(sem->blockedQueue)) {
         int16_t pid = (int16_t)(intptr_t) pollQueue(sem->blockedQueue);
-        setReady(pid);
+        if (setReady(pid) == 0) break;
+        sem->value++;
     }
     RELEASE(&sem->lock);
-    _sti();
     return 0;
+}
+
+int semTryWait(Semaphore sem) {
+    if (!sem) return -1;
+    int got = -1;
+    ACQUIRE(&sem->lock);
+    if (sem->value > 0) {
+        sem->value--;
+        got = 0;
+    }
+    RELEASE(&sem->lock);
+    return got;
 }
 
 void freeSemaphore(Semaphore sem) {
     if (!sem) return;
-    _cli();
     ACQUIRE(&sem->lock);
     if (!isQueueEmpty(sem->blockedQueue)) {   /* no destruir con procesos esperando */
         RELEASE(&sem->lock);
-        _sti();
         return;
     }
     freeQueue(sem->blockedQueue);
     /* no hace falta release: estamos liberando el objeto */
-    _sti();
     mem_free(sem);
 }

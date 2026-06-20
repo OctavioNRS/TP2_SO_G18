@@ -1,148 +1,109 @@
-#include <shell.h>
+/*
+ * commands.c — Tabla de comandos del shell.
+ *
+ * Cada comando es un proceso (entry point con firma int (int argc, char **argv)).
+ * El shell lo crea con sys_create_process_with_fds para conectar bien los pipes.
+ * Todo comando debe terminar con sys_exit().
+ */
 #include <commands.h>
+#include <syscalls.h>
 #include <cstandard.h>
 #include <hexColors.h>
 #include <music.h>
+#include <shell.h>
 #include <tests.h>
+#include <mvar.h>
 
-// Definir mayor o igual que MAX_COMMAND_LENGTH!!
-#define MAX_TOKEN_LENGTH MAX_COMMAND_LENGTH
-#define MAX_TOKENS MAX_TOKEN_LENGTH/2
-#define SEPARATOR ' '
+#define SIZE_BUFFER 128
 
-typedef void (*commandFunction)(char **args, int argCount);
-
-typedef struct
-{
-    char *name;
-    commandFunction function;
-} CommandEntry;
-
-static void clearCommand(char **args, int argCount)
-{
-    clearScreen();
+static int writeStr(int fd, const char *s) {
+    return (int) sys_write(fd, (char *)s, strlen((char *)s));
 }
 
-static void echoCommand(char **args, int argCount) {
-    for (int i = 1; i < argCount; i++)
-    {
-        sys_write(STDOUT, args[i], strlen(args[i]));
-        if (i < argCount-1) {
-            putChar(' ');
-        }
-    }
-    putChar('\n');
+static int clearCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    terminalClear();
+    sys_exit();
+    return 0;
 }
 
-static void helpCommand(char **args, int argCount) {
-    puts("\nAvailable commands:\n");
-    puts("clear - Clears the screen");
-    puts("echo <text> - Prints <text> to the screen");
-    puts("color <b|f|h> <color> - Sets the (b)ackground, (f)oreground or (h)ighlight color");
-    puts("scale <factor> - Sets the screen text size");
-    puts("datetime - Displays current date and time");
-    puts("ls - Display the files in the current directory");
-    puts("registers - Print the last snapshot of the CPU registers (Take one with F6)");
-    puts("music <song> - Plays one of the available songs in our library (r: Rickroll Intro c: Coffin Dance)");
-    puts("ps                          - Lista de procesos");
-    puts("mem                         - Estado del heap");
-    puts("kill <pid>                  - Mata un proceso");
-    puts("nice <pid> <priority>       - Cambia la prioridad de un proceso");
-    puts("block <pid>                 - Bloquea/desbloquea un proceso (toggle)");
-
-    puts("test_mm <max_memory_bytes>  - Stress del memory manager (tecla para terminar)");
-    puts("test_proc <max_processes>   - Stress de procesos crear/bloquear/matar");
-    puts("test_prio <max_value>       - Tres procesos con prioridades distintas");
-    putChar('\n');
-    puts("Exception tests (will crash the shell)\n");
-    puts("zero - Divide by 0");
-    puts("invalid - Invalid opcode");
-    putChar('\n');
+static int echoCommand(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        writeStr(STDOUT, argv[i]);
+        if (i < argc - 1) sys_write(STDOUT, " ", 1);
+    }
+    sys_write(STDOUT, "\n", 1);
+    sys_exit();
+    return 0;
 }
 
-static void colorCommand(char **args, int argCount) {
-    if (argCount < 2 || strlen(args[1]) != 1) {
-        sys_write(STDERR, "Usage: color <b|f|h> <hexColor>\n", 30);
-        return;
-    }
-    uint32_t color;
-    int resetFlag = 0;
-    if (argCount == 2) {
-        resetFlag = 1;
-    }
-    else {
-        color = hexStringToInt(args[2]);
-        if (color == -1) {
-            sys_write(STDERR, "Invalid color\n", 14);
-            return;
-        }
-    }
+static char *weekdays[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 
-    switch (args[1][0])
-    {
-        case 'b':
-            color &= 0x00FFFFFF; // Para evitar setear alpha
-            if (resetFlag) resetBackgroundColor();
-            else setBackgroundColor(color);
-            clearScreen();
+static int datetimeCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint8_t h, m, s, wd, d, mo, y;
+    sys_date(&wd, &d, &mo, &y);
+    sys_time(&h, &m, &s);
+    printf("%d:%d:%d %s %d/%d/%d\n", h, m, s, weekdays[wd - 1], d, mo, y);
+    sys_exit();
+    return 0;
+}
+
+static int registersCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (!sys_print_registers()) {
+        writeStr(STDERR, "No snapshot taken. Press F6 at any moment to take one.\n");
+    }
+    sys_exit();
+    return 0;
+}
+
+static int zeroCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    volatile int zero = 0;
+    volatile int a = 1 / zero;
+    (void)a;
+    sys_exit();
+    return 0;
+}
+
+static int invalidCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    test_invalid_opcode();
+    sys_exit();
+    return 0;
+}
+
+static int lsCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    writeStr(STDERR, "Of course there is no file system\n");
+    play_song(get_rickroll_song());
+    sys_exit();
+    return 0;
+}
+
+static int musicCommand(int argc, char **argv) {
+    if (argc < 2) {
+        writeStr(STDERR, "Usage: music <r|c>\n");
+        sys_exit();
+        return 0;
+    }
+    switch (argv[1][0]) {
+        case 'r':
+            writeStr(STDOUT, "Now playing: Rickroll Intro\n");
+            play_song(get_rickroll_song());
             break;
-        case 'f':
-            if (resetFlag) resetForegroundColor();
-            else setForegroundColor(color);
-            break;
-        case 'h':
-            if (resetFlag) resetHighlightColor();
-            else setHighlightColor(color);
+        case 'c':
+            writeStr(STDOUT, "Now playing: Coffin Dance\n");
+            play_song(get_coffin_intro());
+            play_song(get_coffin_chorus());
             break;
         default:
-            sys_write(STDERR, "Use b for background, f for foreground or h for highlight\n", 58);
-            break;
+            writeStr(STDERR, "Use r for Rickroll, c for Coffin Dance\n");
     }
+    sys_exit();
+    return 0;
 }
-
-static char *weekdays[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-
-static void datetimeCommand(char **args, int argCount) {
-    uint8_t hour,minute,second,weekday,day,month,year;
-    sys_date(&weekday,&day,&month,&year);
-    sys_time(&hour,&minute,&second);
-    printf("%d:%d:%d %s %d/%d/%d\n",hour,minute,second,weekdays[weekday-1],day,month,year);
-}
-
-static void scaleCommand(char **args, int argCount) {
-    int scale = stringToInt(args[1]);
-    if (argCount < 2 || scale <= 0) {
-        sys_write(STDERR,"Usage: scale <factor> | factor > 0\n",35);
-        return;
-    }
-    setScale(scale);
-    clearScreen();
-}
-
-static void registerCommand(char **args, int argCount) {
-    if (!sys_print_registers()) {
-        sys_write(STDERR, "No snapshot taken. Press F6 at any moment to take one.\n", 55);
-    }
-}
-
-static void testDivideByZero(char **args, int argCount) {
-    /* `volatile` evita el warning de constant division by zero; la #DE ocurre en runtime. */
-    volatile int zero = 0;
-    volatile int a = argCount / zero;
-    (void)a;
-}
-
-static void testInvalidOpcode(char **args, int argCount) {
-    test_invalid_opcode();
-}
-
-static void rickrollCommand(char **args, int argCount) {
-    sys_write(STDERR, "Of course there is no file system\n", 34);
-    printOutput();
-    play_song(get_rickroll_song());
-}
-
-/* ---------- Comandos del scheduler/memoria (Parte 3) ---------- */
 
 static const char *stateName(ProcState s) {
     switch (s) {
@@ -156,24 +117,58 @@ static const char *stateName(ProcState s) {
 
 #define PS_MAX_PROCS 64
 
-static void psCommand(char **args, int argCount) {
-    ProcessInfo procs[PS_MAX_PROCS];
-    int n = (int) sys_ps(procs, PS_MAX_PROCS);
-    printf("PID  PPID  PRIO  STATE    NAME\n");
-    for (int i = 0; i < n; i++) {
-        printf("%d    %d     %d     %s",
-               (int)procs[i].pid, (int)procs[i].ppid,
-               (int)procs[i].priority, stateName(procs[i].state));
-        /* Espacios para alinear el nombre con la columna STATE de ancho ~8 */
-        const char *st = stateName(procs[i].state);
-        int slen = 0; while (st[slen]) slen++;
-        for (int j = slen; j < 8; j++) putChar(' ');
-        printf(" %s\n", procs[i].name);
+static void writeHex64(int fd, uint64_t value) {
+    static const char hexChars[] = "0123456789ABCDEF";
+    char buf[19];
+    buf[0] = '0';
+    buf[1] = 'x';
+    for (int i = 0; i < 16; i++) {
+        buf[2 + i] = hexChars[(value >> ((15 - i) * 4)) & 0xF];
     }
-    printOutput();
+    buf[18] = '\0';
+    sys_write(fd, buf, 18);
 }
 
-static void memCommand(char **args, int argCount) {
+static void padTo(int currentLen, int target) {
+    for (int j = currentLen; j < target; j++) putChar(' ');
+}
+
+static int psCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    ProcessInfo procs[PS_MAX_PROCS];
+    int n = (int) sys_ps(procs, PS_MAX_PROCS);
+
+    printf("PID  PPID PRIO FG  STATE   RSP                STACKBASE          NAME\n");
+    for (int i = 0; i < n; i++) {
+        ProcessInfo *p = &procs[i];
+        char num[8];
+
+        numToString(p->pid, num);      sys_write(STDOUT, num, strlen(num));
+        padTo(strlen(num), 5);
+
+        numToString(p->ppid, num);     sys_write(STDOUT, num, strlen(num));
+        padTo(strlen(num), 5);
+
+        numToString(p->priority, num); sys_write(STDOUT, num, strlen(num));
+        padTo(strlen(num), 5);
+
+        sys_write(STDOUT, p->inForeground ? "YES " : "NO  ", 4);
+
+        const char *st = stateName(p->state);
+        sys_write(STDOUT, (char *)st, strlen((char *)st));
+        padTo(strlen((char *)st), 8);
+
+        writeHex64(STDOUT, (uint64_t)p->rsp);       putChar(' ');
+        writeHex64(STDOUT, (uint64_t)p->stackBase); putChar(' ');
+
+        printf("%s\n", p->name);
+    }
+    sys_exit();
+    return 0;
+}
+
+static int memCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
     MemoryInfo m;
     sys_mem_status(&m);
     printf("Memoria (bytes):\n");
@@ -181,181 +176,226 @@ static void memCommand(char **args, int argCount) {
     printf("  ocupada  : %d\n", (int)m.occupied);
     printf("  libre    : %d\n", (int)m.free);
     printf("  fragments: %d\n", (int)m.fragments);
-    printOutput();
+    sys_exit();
+    return 0;
 }
 
-static void killCommand(char **args, int argCount) {
-    if (argCount < 2) {
-        sys_write(STDERR, "Usage: kill <pid>\n", 18);
-        return;
+static int killCommand(int argc, char **argv) {
+    if (argc < 2) {
+        writeStr(STDERR, "Usage: kill <pid>\n");
+        sys_exit();
+        return 0;
     }
-    int64_t pid = stringToInt(args[1]);
-    if (pid < 0) {
-        sys_write(STDERR, "kill: pid invalido\n", 19);
-        printOutput();
-        return;
-    }
-    if (sys_kill((int16_t)pid) < 0) {
+    int64_t pid = stringToInt(argv[1]);
+    if (pid < 0 || sys_kill((int16_t)pid) < 0) {
         printf("kill: no se pudo matar al pid %d\n", (int)pid);
-        printOutput();
-        return;
+    } else {
+        printf("kill: pid %d terminado\n", (int)pid);
     }
-    printf("kill: pid %d terminado\n", (int)pid);
-    printOutput();
+    sys_exit();
+    return 0;
 }
 
-static void niceCommand(char **args, int argCount) {
-    if (argCount < 3) {
-        sys_write(STDERR, "Usage: nice <pid> <priority>\n", 29);
-        return;
+static int niceCommand(int argc, char **argv) {
+    if (argc < 3) {
+        writeStr(STDERR, "Usage: nice <pid> <priority>\n");
+        sys_exit();
+        return 0;
     }
-    int64_t pid = stringToInt(args[1]);
-    int64_t prio = stringToInt(args[2]);
-    if (pid < 0 || prio < 1) {
-        sys_write(STDERR, "nice: argumentos invalidos (priority >= 1)\n", 43);
-        printOutput();
-        return;
+    int64_t pid  = stringToInt(argv[1]);
+    int64_t prio = stringToInt(argv[2]);
+    if (pid < 0 || prio < 1 || sys_nice((int16_t)pid, (uint8_t)prio) < 0) {
+        printf("nice: argumentos invalidos o pid %d no existe\n", (int)pid);
+    } else {
+        printf("nice: pid %d -> prioridad %d\n", (int)pid, (int)prio);
     }
-    if (sys_nice((int16_t)pid, (uint8_t)prio) < 0) {
-        printf("nice: no se pudo cambiar la prioridad del pid %d\n", (int)pid);
-        printOutput();
-        return;
-    }
-    printf("nice: pid %d -> prioridad %d\n", (int)pid, (int)prio);
-    printOutput();
+    sys_exit();
+    return 0;
 }
 
-/* block: toggle. Intenta bloquear primero; si falla (probablemente porque el proceso ya
- * está BLOCKED), intenta desbloquearlo. Si ambas syscalls fallan, reporta error. */
-static void blockCommand(char **args, int argCount) {
-    if (argCount < 2) {
-        sys_write(STDERR, "Usage: block <pid>\n", 19);
-        return;
+static int loopCommand(int argc, char **argv) {
+    int secs = 1;
+    if (argc >= 2) {
+        int64_t v = stringToInt(argv[1]);
+        if (v > 0) secs = (int) v;
     }
-    int64_t pid = stringToInt(args[1]);
+    int16_t pid = sys_getpid();
+    while (1) {
+        printf("Hola del PID %d\n", (int) pid);
+        uint64_t start = sys_kernel_time();
+        uint64_t target = start + (uint64_t)(secs * 1000);
+        while (sys_kernel_time() < target) { /* espera activa */ }
+    }
+    sys_exit();
+    return 0;
+}
+
+static int blockCommand(int argc, char **argv) {
+    if (argc < 2) {
+        writeStr(STDERR, "Usage: block <pid>\n");
+        sys_exit();
+        return 0;
+    }
+    int64_t pid = stringToInt(argv[1]);
     if (pid < 0) {
-        sys_write(STDERR, "block: pid invalido\n", 20);
-        printOutput();
-        return;
-    }
-    if (sys_block((int16_t)pid) == 0) {
+        writeStr(STDERR, "block: pid invalido\n");
+    } else if (sys_block((int16_t)pid) == 0) {
         printf("block: pid %d bloqueado\n", (int)pid);
     } else if (sys_unblock((int16_t)pid) == 0) {
         printf("block: pid %d desbloqueado\n", (int)pid);
     } else {
         printf("block: no se pudo (pid %d)\n", (int)pid);
     }
-    printOutput();
+    sys_exit();
+    return 0;
 }
 
-static void musicCommand(char **args, int argCount) {
-    if (argCount < 2) {
-        sys_write(STDERR, "Usage: music <song>\n", 20);
-        return;
+static int catCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    int size = 64;
+    char buf[size];
+    while (1) {
+        int n = (int) sys_read(STDIN, buf, size);
+        if (n <= 0) break;
+        sys_write(STDOUT, buf, n);
     }
-    if (args[1][0] == 'r') {
-        printf("Now playing: Rickroll Intro\n");
-    }
-    else if (args[1][0] == 'c') {
-        printf("Now playing: Coffin Dance\n");
-    }
-    printOutput();
-    switch (args[1][0])
-    {
-    case 'r':
-        play_song(get_rickroll_song());
-        break;
-    case 'c':
-        play_song(get_coffin_intro());
-        play_song(get_coffin_chorus());
-        break;
-    default:
-        sys_write(STDERR, "Use r for Rickroll Intro, c for Coffin Dance\n", 45);
-        break;
-    }
+    sys_exit();
+    return 0;
 }
+
+static int wcCommand(int argc, char **argv) {
+    (void)argv;
+    if (argc > 1) {
+        writeStr(STDERR, "wc does not allow parameters\n");
+        sys_exit();
+        return 0;
+    }
+    char buf[SIZE_BUFFER];
+    int lines = 0, words = 0, chars = 0;
+    int inWord = 0;
+    while (1) {
+        int n = (int) sys_read(STDIN, buf, sizeof(buf));
+        if (n <= 0) break;
+        sys_write(STDOUT, buf, n);
+        for (int i = 0; i < n; i++) {
+            chars++;
+            char c = buf[i];
+            if (c == '\n') lines++;
+            if (c == ' ' || c == '\n' || c == '\t') {
+                inWord = 0;
+            } else if (!inWord) {
+                inWord = 1;
+                words++;
+            }
+        }
+    }
+    printf("\n %d lineas, %d palabras, %d caracteres\n", lines, words, chars);
+    sys_exit();
+    return 0;
+}
+
+static int isVowel(char c) {
+    c = toLower(c);
+    return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u';
+}
+
+static int filterCommand(int argc, char **argv) {
+     if (argc >  1) {
+        writeStr(STDERR, "Filter does not allow parameter\n");
+        sys_exit();
+        return 0;
+    }
+    (void)argc; (void)argv;
+    char buf[128];
+    char out[128];
+   
+    while (1) {
+        int n = (int) sys_read(STDIN, buf, sizeof(buf));
+        if (n <= 0) break;
+        int k = 0;
+        for (int i = 0; i < n; i++) {
+            if (!isVowel(buf[i])) out[k++] = buf[i];
+        }
+        if (k > 0) sys_write(STDOUT, out, k);
+    }
+    sys_exit();
+    return 0;
+}
+
+typedef struct {
+    const char  *name;
+    ProcessEntry entry;
+    const char  *description;
+    uint8_t      isTest;        /* 1 si es un test de cátedra, 0 si es un comando normal */
+} CommandEntry;
+
+static int helpCommand(int argc, char **argv);
 
 static CommandEntry validCommands[] = {
-    {"clear", clearCommand},
-    {"echo", echoCommand},
-    {"help", helpCommand},
-    {"color", colorCommand},
-    {"datetime", datetimeCommand},
-    {"scale", scaleCommand},
-    {"registers", registerCommand},
-    {"zero", testDivideByZero},
-    {"invalid", testInvalidOpcode},
-    {"ls", rickrollCommand},
-    {"music", musicCommand},
-    /* Scheduler / memoria */
-    {"ps",      psCommand},
-    {"mem",     memCommand},
-    {"kill",    killCommand},
-    {"nice",    niceCommand},
-    {"block",   blockCommand},
-    /* Tests */
-    {"test_mm",   test_mm_command},
-    {"test_proc", test_proc_command},
-    {"test_prio", test_prio_command}
+    {"help",      helpCommand,      "Lista los comandos disponibles", 0},
+    {"clear",     clearCommand,     "Limpia la pantalla", 0},
+    {"echo",      echoCommand,      "Imprime sus argumentos", 0},
+    {"datetime",  datetimeCommand,  "Imprime la fecha y hora actuales", 0},
+    {"registers", registersCommand, "Imprime el snapshot de registros (toma uno con F6)", 0},
+    {"ls",        lsCommand,        "Lista los archivos en el directorio actual", 0},
+    {"music",     musicCommand,     "Reproduce una cancion (r=Rickroll, c=Coffin)", 0},
+    {"zero",      zeroCommand,      "Provoca una division por cero (excepcion)", 0}, 
+    {"invalid",   invalidCommand,   "Provoca un opcode invalido (excepcion)", 0},
+    {"ps",        psCommand,        "Lista los procesos del sistema", 0},
+    {"mem",       memCommand,       "Estado del heap", 0},
+    {"loop",      loopCommand,      "Imprime su PID cada N segundos (espera activa)", 0},
+    {"kill",      killCommand,      "Mata un proceso por PID", 0},
+    {"nice",      niceCommand,      "Cambia la prioridad de un proceso", 0},
+    {"block",     blockCommand,     "Bloquea/desbloquea un proceso (toggle)", 0},
+    {"cat",       catCommand,       "Lee de stdin y escribe a stdout", 0},
+    {"wc",        wcCommand,        "Cuenta lineas, palabras y caracteres de stdin", 0},
+    {"filter",    filterCommand,    "Filtra las vocales de stdin", 0},
+    {"mvar",      mvarCommand,      "MVar de Haskell: lectores/escritores sobre variable compartida (Usage: mvar <writers> <readers>)", 0},
+    {"test_mm",   test_mm_command,   "Stress del memory manager (Usage: test_mm <max_bytes>)",            1},
+    {"test_proc", test_proc_command, "Stress del scheduler crea/bloquea/mata procesos (Usage: test_proc <max_procs>)", 1},
+    {"test_prio", test_prio_command, "Tres procesos con prioridades distintas (Usage: test_prio <max_value>)",         1},
+    {"test_sync", test_sync_command, "Race conditions con y sin semaforos (Usage: test_sync <n_procesos> <n_iter> <use_sem>)", 1}
 };
 
-static int getCommandIndex(char *commandName)
-{
-    if (commandName[0] == 0) return -2;
-    for (int i = 0; i < sizeof(validCommands)/sizeof(CommandEntry); i++)
-    {
-        if (strcmp(commandName,validCommands[i].name) == 0) {
-            return i;
-        }
+#define COMMAND_COUNT (sizeof(validCommands) / sizeof(CommandEntry))
+
+static int helpCommand(int argc, char **argv) {
+    (void)argc; (void)argv;
+    writeStr(STDOUT, "\n" COLOR_FG("00FFFF") "Available commands:" COLOR_RESET "\n");
+    for (int i = 0; i < (int)COMMAND_COUNT; i++) {
+        if (validCommands[i].isTest) continue;
+        printf("  " COLOR_FG("80FF80") "%s" COLOR_RESET " - %s\n",
+               validCommands[i].name, validCommands[i].description);
     }
-    return -1; //Command not found
+    writeStr(STDOUT, "\n" COLOR_FG("FFFF60") "Tests provistos por la catedra:" COLOR_RESET "\n");
+    for (int i = 0; i < (int)COMMAND_COUNT; i++) {
+        if (!validCommands[i].isTest) continue;
+        printf("  " COLOR_FG("FFFF60") "%s" COLOR_RESET " - %s\n",
+               validCommands[i].name, validCommands[i].description);
+    }
+    sys_write(STDOUT, "\n", 1);
+    sys_exit();
+    return 0;
 }
 
-void interpretCommand(char *command)
-{
-    // Ignorar blancos iniciales
-    while(*command == SEPARATOR){
-        command++;
+int getCommandIndex(const char *name) {
+    if (!name || !*name) return -1;
+    for (int i = 0; i < (int)COMMAND_COUNT; i++) {
+        if (strcmp((char *)name, (char *)validCommands[i].name) == 0) return i;
     }
+    return -1;
+}
 
-    // Tokenize
+ProcessEntry getCommandEntry(int idx) {
+    if (idx < 0 || idx >= (int)COMMAND_COUNT) return 0;
+    return validCommands[idx].entry;
+}
 
-    char tokenBuffer[MAX_TOKENS][MAX_TOKEN_LENGTH] = {0};
-    int token = 0;
-    int inTokenIndex = 0;
+const char *getCommandName(int idx) {
+    if (idx < 0 || idx >= (int)COMMAND_COUNT) return 0;
+    return validCommands[idx].name;
+}
 
-    for (int i = 0; command[i] != 0 && i < MAX_COMMAND_LENGTH; i++)
-    {
-        if (command[i] != SEPARATOR)
-        {
-            tokenBuffer[token][inTokenIndex++] = command[i];
-        }
-        else
-        {
-            tokenBuffer[token++][inTokenIndex] = 0;
-            inTokenIndex = 0;
-        }
-    }
-    tokenBuffer[token++][inTokenIndex] = 0;
-
-    char *args[MAX_TOKENS];
-    for(int i = 0; i < token; i++) {
-        args[i] = tokenBuffer[i];
-    }
-
-    // args[0] = command name
-    int commandIndex = getCommandIndex(args[0]);
-    // Rerserved: -1 = not found, -2 = empty
-    switch (commandIndex)
-    {
-    case -1:
-        sys_write(STDERR, "Command not found: ", 19);
-        sys_write(STDERR, args[0], strlen(args[0]));
-        putc('\n', STDERR);
-        return;
-    case -2:
-        return;
-    }
-
-    validCommands[commandIndex].function(args, token);
+int getCommandCount(void) {
+    return (int)COMMAND_COUNT;
 }

@@ -19,5 +19,6 @@ void drawString(unsigned char *string, int x, int y, uint32_t fgcolor, uint32_t 
 void setBackground(uint32_t color);
 void setAuxFramebuffer(uint8_t *buffer, uint32_t width, uint32_t height);
 void renderAux();
+void scrollUp(uint64_t pixelRows, uint32_t fillColor);
 
 #endif

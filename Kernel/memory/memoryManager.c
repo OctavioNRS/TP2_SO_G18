@@ -1,13 +1,5 @@
 /*
  * memoryManager.c — Administrador de memoria por FREE LIST (first-fit con coalescing).
- *
- * Implementación por defecto (se compila cuando NO está definido USE_BUDDY).
- *
- * Diseño: una lista doblemente enlazada de bloques contiguos en memoria, ordenada
- * por dirección física. Cada bloque tiene un encabezado (Block) seguido de su
- * payload. `mem_alloc` busca el primer bloque libre que alcance (first-fit) y lo
- * parte si sobra espacio; `mem_free` marca el bloque libre y lo fusiona
- * (coalescing) con sus vecinos físicos libres para combatir la fragmentación.
  */
 #ifndef USE_BUDDY
 
@@ -60,7 +52,7 @@ void *mem_alloc(uint64_t size) {
         b->free = 0;
         return (void *)(b + 1);
     }
-    return NULL;   /* sin espacio */
+    return NULL;
 }
 
 void mem_free(void *ptr) {
@@ -96,4 +88,4 @@ void mem_status(MemoryInfo *info) {
     info->occupied = totalBytes - info->free;
 }
 
-#endif /* !USE_BUDDY */
+#endif 

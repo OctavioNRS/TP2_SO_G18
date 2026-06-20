@@ -1,8 +1,12 @@
+/*
+ * tests.h — Tests de cátedra como procesos de usuario.
+ */
 #ifndef TESTS_H
 #define TESTS_H
 
-void test_mm_command(char **args, int argCount);
-void test_proc_command(char **args, int argCount);
-void test_prio_command(char **args, int argCount);
+int test_mm_command(int argc, char **argv);
+int test_proc_command(int argc, char **argv);
+int test_prio_command(int argc, char **argv);
+int test_sync_command(int argc, char **argv);
 
 #endif

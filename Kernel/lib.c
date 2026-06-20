@@ -110,17 +110,3 @@ void concat_strings(char *dest, const char *str1, const char *str2) {
     
     dest[pos] = '\0';
 }
-
-/* No usamos
-char *strcat(char *dest, const char *src) {
-    char *temp = dest;
-    
-    // Find the end of the destination string
-    while(*dest)
-        dest++;
-    
-    // Append the source string
-    while((*dest++ = *src++) != 0);
-    
-    return temp;
-}*/

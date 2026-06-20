@@ -2,13 +2,14 @@
 #include <string.h>
 #include <lib.h>
 #include <moduleLoader.h>
-#include <naiveConsole.h>
 #include <videoDriver.h>
 #include <keyboardDriver.h>
 #include <idtLoader.h>
 #include <interrupts.h>
 #include <memoryManager.h>
 #include <scheduler.h>
+#include <pipe.h>
+#include <fileAccess.h>
 
 extern uint8_t text;
 extern uint8_t rodata;
@@ -50,31 +51,46 @@ void * initializeKernelBinary()
 
 /*
  * Proceso init (PID 1).
+ *
+ *  1. Crea el pipe del teclado y registra a init como su único lector (su fd 0).
+ *  2. Conecta el ISR del teclado al lado de escritura del pipe.
+ *  3. Lanza al shell (sampleCodeModule, cargado en 0x400000), que hereda los fds de
+ *     init. Como init tiene fd 0 conectado al pipe del teclado y fd 1/2 vacíos, el
+ *     shell arranca con STDIN = teclado y STDOUT/STDERR = /dev/null; el propio shell
+ *     se encarga de cablear STDOUT/STDERR a un pipe que va al proceso Terminal (que
+ *     queda como hijo del shell).
+ *  4. Entra en wait_any en loop reapeando huérfanos (procesos cuyo padre murió).
  */
 static int initProcessEntry(int argc, char **argv)
 {
 	(void)argc; (void)argv;
-	while (1) {
-		wait_any();
-	}
+
+	/* Pipe del teclado: init mantiene el read-end (fd 0 = STDIN); el driver del
+	 * teclado mantiene el write-end. Cualquier hijo de init hereda fd 0 vía
+	 * copyFdTable. */
+	Pipe       kbdPipe   = newPipe();
+	FileAccess kbdRead   = newFileAccess(kbdPipe, FILE_READ);
+	FileAccess kbdWrite  = newFileAccess(kbdPipe, FILE_WRITE);
+	addCurrentFd(kbdRead);
+	initializeKeyboardDriver(kbdWrite);
+
+	startNewProcess((ProcessEntryPoint)sampleCodeModuleAddress, "shell", 1, 0, 0);
+
+	while (1) wait_any();
 	return 0;
 }
 
 int main()
 {
-	load_idt();          /* configura IDT + PIC y habilita interrupciones (_sti) */
-	_cli();              /* deshabilito mientras armo memoria y procesos          */
-
+	/* Orden: mem_init antes de initializeScheduler (que mem_alloc-ea PCBs).
+	 * load_idt habilita IRQs (_sti al final), pero schedule() chequea
+	 * schedulerEnabled antes de conmutar, así que es seguro. enableScheduler
+	 * destraba el cambio de contexto desde el próximo tick. */
 	mem_init((void *)MEM_HEAP_START, MEM_HEAP_SIZE);
-
-	/* initializeScheduler crea idle (PID 0) y el proceso init (PID 1). */
 	initializeScheduler(initProcessEntry);
+	load_idt();
+	enableScheduler();
 
-	/* El primer proceso de userland: el módulo cargado en 0x400000. */
-	startNewProcess((ProcessEntryPoint)sampleCodeModuleAddress, "userland", 1, 0, 0);
-
-	enableScheduler();   /* habilita el cambio de contexto recién ahora */
-	_sti();              /* el primer tick del timer arranca el scheduling */
 	while (1) _hlt();
 
 	return 0;

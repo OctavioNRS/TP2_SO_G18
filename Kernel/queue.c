@@ -27,8 +27,8 @@ static void removeNodeFromQueue(Queue queue, List nodeToRemove, List previousNod
 
 Queue newQueue(void) {
     Queue queue = mem_alloc(sizeof(queueCDT));
-    if (!queue) return 0;
-    queue->first = queue->last = 0;
+    if (!queue) return NULL;
+    queue->first = queue->last = NULL;
     queue->count = 0;
     return queue;
 }
@@ -37,21 +37,25 @@ int enqueue(Queue queue, void *elementToAdd) {
     List newNode = mem_alloc(sizeof(Node));
     if (!newNode) return 0;
     newNode->data = elementToAdd;
-    newNode->tail = 0;
-    if (isQueueEmpty(queue)) queue->first = queue->last = newNode;
-    else { queue->last->tail = newNode; queue->last = newNode; }
+    newNode->tail = NULL;
+    if (isQueueEmpty(queue)){
+        queue->first = queue->last = newNode;
+    }else{
+        queue->last->tail = newNode;
+        queue->last = newNode;
+    }
     queue->count++;
     return 1;
 }
 
 void *pollQueue(Queue queue) {
-    if (isQueueEmpty(queue)) return 0;
+    if (isQueueEmpty(queue)) return NULL;
     void *removedElement = queue->first->data;
     List  nextNode       = queue->first->tail;
     mem_free(queue->first);
     queue->first = nextNode;
     queue->count--;
-    if (queue->count == 0) queue->last = 0;
+    if (queue->count == 0) queue->last = NULL;
     return removedElement;
 }
 
@@ -84,6 +88,6 @@ int removeFromQueue(Queue queue, void *elementToRemove, QueueCompareFunction com
         }
         currentNode = nextNode;
     }
-    if (isQueueEmpty(queue)) queue->first = queue->last = 0;
+    if (isQueueEmpty(queue)) queue->first = queue->last = NULL;
     return removedCount;
 }

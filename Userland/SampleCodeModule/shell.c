@@ -1,383 +1,225 @@
+/*
+ * shell.c — Shell interactiva en userland.
+ */
 #include <shell.h>
-#include <point.h>
-#include <hexColors.h>
-#include <syscalls.h>
 #include <commands.h>
+#include <terminal.h>
+#include <syscalls.h>
 #include <cstandard.h>
-#include <music.h>
+#include <hexColors.h>
 
-#define CHAR_WIDTH (8*textScale)
-#define CHAR_HEIGHT (16*textScale)
-#define CURSOR_HEIGHT (1*textScale)
-#define CURSOR_INIT {8,16}
+#define MAX_TOKENS    16
+#define MAX_PIPELINE  2       /* máx etapas p1 | p2 (un solo `|`) */
 
-#define DEFAULT_BG BLACK
-#define DEFAULT_FG WHITE
-#define DEFAULT_HL -1
-
-static point2D cursor = CURSOR_INIT;
-static point2D cursorStart = CURSOR_INIT;
-static point2D cursorCommandStart = CURSOR_INIT;
-
-static uint32_t backgroundColor = DEFAULT_BG;
-static uint32_t foregroundColor = DEFAULT_FG;
-static uint32_t highlightColor = DEFAULT_HL;
-
-static uint16_t screenWidth;
-static uint16_t screenHeight;
-
-static int textScale = 1;
-
-static void setCursorStartPos() {
-    cursorStart = (point2D){CHAR_WIDTH,CHAR_HEIGHT};
-}
-
-uint32_t getBackgroundColor() {
-    return backgroundColor;
-}
-
-void setBackgroundColor(uint32_t color) {
-    backgroundColor = color;
-}
-
-uint32_t getForegroundColor() {
-    return foregroundColor;
-}
-
-void setForegroundColor(uint32_t color) {
-    foregroundColor = color;
-}
-
-void setHighlightColor(uint32_t color) {
-    highlightColor = color;
-}
-
-void resetBackgroundColor() {
-    backgroundColor = DEFAULT_BG;
-}
-void resetForegroundColor() {
-    foregroundColor = DEFAULT_FG;
-}
-void resetHighlightColor() {
-    highlightColor = DEFAULT_HL;
-}
-
-static void getScreenSize() {
-    screenWidth = sys_screen_width();
-    screenHeight = sys_screen_height();
-}
-
-void setScale(int scale) {
-    if (scale <= 0) return;
-    textScale = scale;
-    setCursorStartPos();
-    getScreenSize();
-    //floor(screen_width / char_width)*char_width = max_chars*char_width = max_x
-    screenWidth = (screenWidth/CHAR_WIDTH)*CHAR_WIDTH;
-    screenHeight = (screenHeight/CHAR_HEIGHT)*CHAR_HEIGHT;
+void terminalClear(void) {
+    sys_write(STDOUT, "\f", 1);
 }
 
 
-static void cursorRect(uint32_t color) {
-    sys_draw_rect(color, cursor.x, cursor.y - CURSOR_HEIGHT, CHAR_WIDTH, CURSOR_HEIGHT);
+static void launchTerminal(void) {
+
+    sys_dup(STDIN, STDOUT);
+    sys_dup(STDIN, STDERR);
+
+    int pipeFds[2];
+    if (sys_pipe(pipeFds) < 0) return;
+
+
+    sys_dup(pipeFds[1], STDOUT);
+    sys_dup(pipeFds[1], STDERR);
+    sys_close(pipeFds[1]);
+
+
+    fd_override_t overrides[] = {
+        {STDIN,     pipeFds[0]},
+        {STDOUT,    -1},
+        {STDERR,    -1},
+        {pipeFds[0], -1}
+    };
+    sys_create_process_with_fds(terminalProcess, 0, 0, "terminal", overrides, 4);
+
+    sys_close(pipeFds[0]);
 }
 
-static void drawChar(unsigned char c, uint32_t hexColor)
-{
-    sys_draw_char(c, cursor.x, cursor.y, hexColor, -1, textScale);
-}
 
-static void drawCharBg(unsigned char c, uint32_t hexColor, uint32_t hexBgColor)
-{
-    if (hexBgColor == -1) {
-        drawChar(c, hexColor);
-        return;
-    }
-    // drawSymbol(c,cursor.x,cursor.y,hexColor,hexBgColor);
-    sys_draw_char(c, cursor.x, cursor.y, hexColor, hexBgColor, textScale);
-}
+static int readLine(char *line, int maxLen) {
+    int idx = 0;
+    while (1) {
+        char c;
+        int n = (int) sys_read(STDIN, &c, 1);
+        if (n <= 0) return -1;     /* EOF (Ctrl+D) o error */
+        if (c == '\0') continue;   /* despertador de Ctrl+D, ignorar */
 
-static void setCursor(point2D newCursor) {
-    cursor = newCursor;
-    cursorRect(foregroundColor);
-}
-
-static void resetCursor() {
-    setCursor(cursorStart);
-}
-
-static void carriageReturn() {
-    setCursor(point(cursorStart.x, cursor.y));
-}
-
-static void newLine()
-{
-    cursor.y += CHAR_HEIGHT;
-    carriageReturn();
-}
-
-static void moveCursor() {
-    cursor.x += CHAR_WIDTH;
-    if(cursor.x >= screenWidth) {
-        newLine();
+        if (c == '\n') {
+            putChar('\n');
+            line[idx] = '\0';
+            return idx;
+        }
+        if (c == '\b') {
+            if (idx > 0) {
+                idx--;
+                line[idx] = '\0';
+                putChar('\b');
+            }
+            continue;
+        }
+        if (idx < maxLen - 1 && isPrintableAscii(c)) {
+            line[idx++] = c;
+            putChar(c);
+        }
     }
 }
 
-void clearScreen()
-{
-    //sys_draw_rect(backgroundColor, 0, 0, screenWidth, screenHeight);
-    sys_background(backgroundColor);
-    resetCursor();
-}
-
-static void checkScreenHeightEnd() {
-    if(cursor.y > screenHeight) {
-        clearScreen();
+static int tokenize(char *str, char **tokens, int maxTokens) {
+    int n = 0;
+    while (*str && n < maxTokens) {
+        while (*str == ' ' || *str == '\t') str++;
+        if (!*str) break;
+        tokens[n++] = str;
+        while (*str && *str != ' ' && *str != '\t') str++;
+        if (*str) { *str = '\0'; str++; }
     }
+    return n;
 }
 
-static int specialCharacterCheck(unsigned char c) {
-    if(c == '\n') {
-        newLine();
-        return 1;
-    } else if(c == '\r') {
-        carriageReturn();
+/* Encuentra y separa los `|` en la cadena (in-place). Devuelve cantidad de etapas, con
+ * sus punteros en `stages[]`. Devuelve -1 si aparece un `|` adicional que excede
+ * `maxStages` (la consigna pide soportar a lo sumo 2 etapas = 1 sólo `|`). */
+static int splitPipeline(char *line, char **stages, int maxStages) {
+    int n = 0;
+    char *p = line;
+    stages[n++] = p;
+    while (*p) {
+        if (*p == '|') {
+            if (n >= maxStages) return -1;
+            *p = '\0';
+            p++;
+            while (*p == ' ') p++;
+            stages[n++] = p;
+        } else {
+            p++;
+        }
+    }
+    return n;
+}
+
+/* Verifica si la línea termina con `&` (y la trunca). */
+static int hasBackground(char *line) {
+    int len = strlen(line);
+    while (len > 0 && (line[len-1] == ' ' || line[len-1] == '\t')) {
+        line[--len] = '\0';
+    }
+    if (len > 0 && line[len-1] == '&') {
+        line[--len] = '\0';
+        while (len > 0 && (line[len-1] == ' ' || line[len-1] == '\t')) {
+            line[--len] = '\0';
+        }
         return 1;
     }
     return 0;
 }
 
-static void printCharBg(unsigned char c, uint32_t hexColor, uint32_t hexBgColor)
-{
-    cursorRect(backgroundColor);
-    int special = specialCharacterCheck(c);
-    checkScreenHeightEnd();
-    if (special) return;
-    drawCharBg(c, hexColor, hexBgColor);
-    moveCursor();
-    cursorRect(foregroundColor);
-}
+static int runStage(char *stageStr, int stdinFd, int stdoutFd, int background,
+                    int *closeFds, int nCloseFds) {
+    char *tokens[MAX_TOKENS];
+    int nTokens = tokenize(stageStr, tokens, MAX_TOKENS);
+    if (nTokens == 0) return -1;
 
-static void printChar(unsigned char c, uint32_t hexColor)
-{
-    printCharBg(c, hexColor, highlightColor);
-}
-
-static void cursorBack()
-{
-    if (cursor.x <= cursorCommandStart.x && cursor.y <= cursorCommandStart.y) return;
-    cursor.x -= CHAR_WIDTH;
-    if (cursor.x < cursorStart.x) {
-        cursor.x = screenWidth-CHAR_WIDTH;
-        cursor.y -= CHAR_HEIGHT;
+    int cmdIdx = getCommandIndex(tokens[0]);
+    if (cmdIdx < 0) {
+        const char *prefix = COLOR_FG("FF4040") "Command not found: ";
+        const char *suffix = COLOR_RESET "\n";
+        sys_write(STDERR, (char *)prefix, strlen(prefix));
+        sys_write(STDERR, tokens[0], strlen(tokens[0]));
+        sys_write(STDERR, (char *)suffix, strlen(suffix));
+        return -1;
     }
-}
 
-static void backspace()
-{
-    cursorRect(backgroundColor);
-    cursorBack();
-    drawCharBg(' ',backgroundColor,backgroundColor);
-    cursorRect(foregroundColor);
-}
-
-static void printStrBg(char *str, uint32_t hexColor, uint32_t hexBgColor)
-{
-    while(*str){
-        printCharBg(*str,hexColor,hexBgColor);
-        str++;
+    fd_override_t overrides[3 + MAX_PIPELINE * 2];
+    int nOverrides = 0;
+    if (stdinFd == -1) {
+        overrides[nOverrides++] = (fd_override_t){STDIN, -1};
+    } else if (stdinFd != STDIN) {
+        overrides[nOverrides++] = (fd_override_t){STDIN, stdinFd};
     }
-}
-
-static void printStr(char *str, uint32_t hexColor)
-{
-    printStrBg(str, hexColor, highlightColor);
-}
-
-static void print(char *str) {
-    printStr(str, foregroundColor);
-}
-
-// Command interpreter
-
-// Segundo byte de los multibytes que puede leer
-#define ARROW_UP 0x48
-#define ARROW_LEFT 0x4B
-#define ARROW_RIGHT 0x4D
-#define ARROW_DOWN 0x50
-
-#define MAX_SAVED_COMMANDS 16
-
-static char *shellPrompt = "[SHELL] > ";
-
-static char commandHistory[MAX_SAVED_COMMANDS][MAX_COMMAND_LENGTH+1] = {0};
-static int saveIndex = 0;
-static int historyAccessIndex = 0;
-
-static char *accessHistory(char key) {
-    int shift;
-    switch (key)
-    {
-    case ARROW_UP:
-        shift=1;
-        break;
-    
-    case ARROW_DOWN:
-        shift=-1;
-        break;
-    
-    default:
-        return (char*)(-1);
+    if (stdoutFd != STDOUT) overrides[nOverrides++] = (fd_override_t){STDOUT, stdoutFd};
+    for (int i = 0; i < nCloseFds; i++) {
+        overrides[nOverrides++] = (fd_override_t){closeFds[i], -1};
     }
-    int readIndex = clamp(historyAccessIndex+shift, -1, MAX_SAVED_COMMANDS-1);
-    if (readIndex == -1) {
-        historyAccessIndex = readIndex;
-        return "";
+
+    int pid = (int) sys_create_process_with_fds(
+        getCommandEntry(cmdIdx), nTokens, tokens, tokens[0],
+        nOverrides > 0 ? overrides : 0, nOverrides);
+
+    if (pid < 0) {
+        sys_write(STDERR, "shell: cannot spawn\n", 20);
+        return -1;
     }
-    if (commandHistory[readIndex][0] == '\0') {
-        return (char*)(-1);
-    }
-    historyAccessIndex = readIndex;
-    return commandHistory[readIndex];
+
+    if (!background) sys_foreground((int16_t) pid);
+    return pid;
 }
 
-static void addToHistory(char *command) {
-    for (int i = MAX_SAVED_COMMANDS-1; i > 0; i--)
-    {
-        for (int j = 0; j < MAX_COMMAND_LENGTH+1; j++)
-        {
-            commandHistory[i][j] = commandHistory[i-1][j];
+static void runLine(char *line) {
+    int background = hasBackground(line);
+
+    char *stages[MAX_PIPELINE];
+    int nStages = splitPipeline(line, stages, MAX_PIPELINE);
+    if (nStages < 0 ) {
+        sys_write(STDERR, "shell: solo se admite un `|` por linea\n", 39);
+        return;
+    }
+    if (nStages == 0) return;
+
+    int childStdin = (int)(int64_t) sys_reopen(STDIN);
+    int firstStdin;
+    if (childStdin < 0) {
+
+        firstStdin = background ? -1 : STDIN;
+    } else {
+        firstStdin = background ? -1 : childStdin;
+    }
+
+    /* Caso simple: una sola etapa. */
+    if (nStages == 1) {
+        int closeOnChild[1];
+        int nClose = 0;
+        if (childStdin >= 0) closeOnChild[nClose++] = childStdin;
+        int pid = runStage(stages[0], firstStdin, STDOUT, background,
+                           nClose > 0 ? closeOnChild : 0, nClose);
+        if (pid >= 0 && !background) {
+            sys_waitpid((int16_t) pid);
+            putChar('\n');
         }
+        if (childStdin >= 0) sys_close(childStdin);
+        return;
     }
-    int write = 0;
-    while(command[write] != 0)
-    {
-        commandHistory[0][write] = command[write];
-        write++;
-    }
-    while(commandHistory[0][write] != 0) {
-        commandHistory[0][write++] = 0;
-    }
-    
-    if (saveIndex < MAX_SAVED_COMMANDS-1) saveIndex++;
-    historyAccessIndex = -1;
+
 }
 
-void printOutput() {
-    char c_out, c_err;
-    do {
-        // Imprimir la salida estandard
-        c_out = getc(STDOUT);
-        if (c_out) {
-            printChar(c_out, foregroundColor);
-        }
-        else {
-            // Si no hay salida estandard, imprimir la salida de error
-            c_err = getc(STDERR);
-            if (c_err) {
-                printChar(c_err, RED);
-            }
-        }
-    } while(c_out || c_err);
-}
 
-static char specialKey(char c) {
-    // Deshace el shift provocado por el driver para obtener
-    // el verdadero segundo byte del scancode
-    return c -= 0x7F;
-}
+#define PROMPT  COLOR_FG("00FFFF") "[SHELL]" COLOR_RESET " > "
+#define WELCOME COLOR_FG("00FF80") "Welcome to TP2 SO G18 shell." COLOR_RESET " Type `help`.\n"
 
-// A pesar de que esta funcion llama todo "command", se ocupa de recibir input del usuario en cualquier momento.
-static int readUserInput() {
-    cursorCommandStart = cursor;
-    int writingCommand = 1;
-    char commandBuffer[MAX_COMMAND_LENGTH+1] = {0};
-    int commandIndex = 0;
-
-    while(writingCommand) {
-        // Leer entrada del usuario
-        char c = getc(STDIN);
-        printOutput();
-
-        if (!isPrintableAscii(c)) {
-            c = specialKey(c);
-
-            // Acceso al historial de comandos           
-            if (c == ARROW_UP || c == ARROW_DOWN) {
-                char *prevCommand = accessHistory(c);
-                if (prevCommand != (char*)(-1)) {
-                    while (commandIndex > 0) {
-                        backspace();
-                        commandBuffer[commandIndex--] = 0;
-                    }
-                    sys_write(STDIN, prevCommand, strlen(prevCommand));
-                }
-            }
-
-            continue;
-        }
-
-        // Escritura del comando
-        if (c == '\b') {
-            backspace();
-            if (commandIndex > 0) commandIndex--;
-            commandBuffer[commandIndex] = 0;
-        }
-        else if (commandIndex < MAX_COMMAND_LENGTH) {
-            printChar(c, foregroundColor);
-            if (c == '\n') {
-                writingCommand = 0;
-            }
-            else commandBuffer[commandIndex++] = c;
-        }
-        else {
-            if (c == '\n') {
-                writingCommand = 0;
-                printChar(c, foregroundColor);
-            }
-        }
-    }
-    return sys_write(STDIN, commandBuffer, strlen(commandBuffer));
-}
-
-void inputMode(int acceptsEmpty) {
-    if (acceptsEmpty) {
-        readUserInput();
-    }
-    else {
-        while (readUserInput() == -1);
+static void shellLoop(void) {
+    char line[MAX_COMMAND_LENGTH];
+    while (1) {
+        sys_reap_zombies();
+        sys_write(STDOUT, PROMPT, strlen(PROMPT));
+        int n = readLine(line, MAX_COMMAND_LENGTH);
+        if (n < 0) return;            /* EOF → fin del shell */
+        if (n == 0) continue;
+        runLine(line);
     }
 }
 
-static void writeCommand() {
-    inputMode(1);
-    char command[MAX_COMMAND_LENGTH+1] = {0};
-    scanf("%s",command);
-    if (command[0] != '\0') addToHistory(command);
-    interpretCommand(command);
-}
-
-static void shellLoop() {
-    while(1) {
-        printOutput();
-        print(shellPrompt);
-        writeCommand();
-    }
-}
-
-static void drawTitle() {
-    uint64_t textWidth = CHAR_WIDTH * 28 * 2;
-    uint64_t bottomLeftX = screenWidth/2 - textWidth/2;
-    sys_draw_string("Sistemas Operativos",bottomLeftX,36,GREEN,-1,2);
-}
-
-void initializeShell() {
-    textScale = 1;
-    setCursorStartPos();
-    getScreenSize();
-    clearScreen();
-    print("\n\n\n");
-    drawTitle();
-    init_music();
+int shellProcess(int argc, char **argv) {
+    (void)argc; (void)argv;
+    launchTerminal();
+    sys_yield();
+    terminalClear();
+    sys_write(STDOUT, WELCOME, strlen(WELCOME));
     shellLoop();
+    sys_exit();
+    return 0;
 }

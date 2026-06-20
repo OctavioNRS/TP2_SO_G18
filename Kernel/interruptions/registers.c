@@ -1,4 +1,5 @@
 #include <registers.h>
+#include <scheduler.h>
 #include <keyboardDriver.h>
 #include <lib.h>
 
@@ -6,36 +7,30 @@ static StackFrame snapshot;
 static StackFrame savedSnapshot;
 static int snapshotTaken = 0;
 
-// Función helper para agregar un registro al output buffer
 static void add_register_to_buffer(char *output_buffer, int *pos, const char *reg_name, uint64_t value) {
     char hex_buffer[19];
-    
-    // Agrego el nombre
+
     for (int i = 0; reg_name[i]; i++) {
         output_buffer[(*pos)++] = reg_name[i];
     }
-    
-    // Agrego el hex
+
     uint64ToHex(value, hex_buffer);
     for (int i = 0; hex_buffer[i]; i++) {
         output_buffer[(*pos)++] = hex_buffer[i];
     }
-    
+
     output_buffer[(*pos)++] = '\n';
 }
 
-// Función para imprimir todos los registros a STDOUT
 void print_registers(StackFrame *frame) {
     char output_buffer[600];
     int pos = 0;
-    
-    // Header
+
     const char *header = "\n=== REGISTER DUMP ===\n";
     for (int i = 0; header[i]; i++) {
         output_buffer[pos++] = header[i];
     }
-    
-    // Agrego todos los registros
+
     add_register_to_buffer(output_buffer, &pos, "RAX: ", frame->rax);
     add_register_to_buffer(output_buffer, &pos, "RBX: ", frame->rbx);
     add_register_to_buffer(output_buffer, &pos, "RCX: ", frame->rcx);
@@ -56,15 +51,16 @@ void print_registers(StackFrame *frame) {
     add_register_to_buffer(output_buffer, &pos, "RFLAGS: ", frame->rflags);
     add_register_to_buffer(output_buffer, &pos, "CS:  ", frame->cs);
     add_register_to_buffer(output_buffer, &pos, "SS:  ", frame->ss);
-    
-    // Footer
+
     const char *footer = "==================\n\n";
     for (int i = 0; footer[i]; i++) {
         output_buffer[pos++] = footer[i];
     }
-    
+
     output_buffer[pos] = '\0';
-    
+
+    /* writeFdOnPID despacha al STDOUT del proceso actual. Si no está conectado
+     * (p. ej. crash muy temprano), descarta silenciosamente. */
     write(STDOUT, output_buffer, pos);
 }
 

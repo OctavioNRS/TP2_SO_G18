@@ -8,8 +8,6 @@
 
 #define RANDOM_MAX UINT16_MAX
 
-void flushBuffer(int fd);
-
 int printf(const char *format, ...);
 int scanf(const char *format, ...);
 

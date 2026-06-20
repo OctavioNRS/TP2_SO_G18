@@ -1,19 +1,16 @@
-/* _loader.c */
+/* _loader.c*/
 #include <stdint.h>
 
 extern char bss;
 extern char endOfBinary;
 
-int main();
+int main(int argc, char **argv);
 
 void * memset(void * destiny, int32_t c, uint64_t length);
 
-int _start() {
-	//Clean BSS
+int _start(int argc, char **argv) {
 	memset(&bss, 0, &endOfBinary - &bss);
-
-	return main();
-
+	return main(argc, argv);
 }
 
 

@@ -1,10 +1,6 @@
 #include <cstandard.h>
 #include <stdarg.h>
 
-void flushBuffer(int fd) {
-    while (getc(fd) != 0);
-}
-
 static int vprintf(const char *format, va_list args) {
     int count = 0;
     char buffer[32];
@@ -166,7 +162,6 @@ int scanf(const char *format, ...) {
     va_start(args, format);
     int result = vscanf(format, args);
     va_end(args);
-    flushBuffer(STDIN);
     return result;
 }
 

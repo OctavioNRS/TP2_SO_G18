@@ -16,4 +16,9 @@
 #define ORANGE 0xFFA500
 #define PURPLE 0x8000FF
 
+#define COLOR_FG(hex6)  "\033f" hex6 ";"     /* setea color de texto */
+#define COLOR_BG(hex6)  "\033b" hex6 ";"     /* setea color de fondo (limpia) */
+#define COLOR_RESET     "\033r;"             /* vuelve a defaults */
+#define COLOR_CLEAR     "\033c;"             /* limpia pantalla */
+
 #endif

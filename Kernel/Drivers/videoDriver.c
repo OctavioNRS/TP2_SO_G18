@@ -402,3 +402,50 @@ void drawString(unsigned char *string, int x, int y, uint32_t fgcolor, uint32_t 
         string++;
     }
 }
+
+/*
+ * Scroll vertical del framebuffer (o del buffer auxiliar, si está activo). Mueve la
+ * imagen `pixelRows` filas hacia arriba (la zona superior se descarta) y rellena la
+ * franja inferior con `fillColor`. Una sola copia lineal por píxel: para 24bpp eso
+ * es 3 bytes; cualquier otra profundidad no se contempla porque el framebuffer del
+ * Pure64 está fijo en 24bpp.
+ */
+void scrollUp(uint64_t pixelRows, uint32_t fillColor) {
+    uint16_t w = getScreenWidth();
+    uint16_t h = getScreenHeight();
+    if (pixelRows == 0 || pixelRows >= h) return;
+
+    if (auxFramebuffer != 0) {
+        for (uint64_t y = 0; y < (uint64_t)h - pixelRows; y++)
+            for (uint64_t x = 0; x < w; x++) {
+                uint32_t c = readPixel(x, y + pixelRows);
+                putPixel(c, x, y);
+            }
+        for (uint64_t y = (uint64_t)h - pixelRows; y < h; y++)
+            for (uint64_t x = 0; x < w; x++) putPixel(fillColor, x, y);
+        return;
+    }
+
+    /* Framebuffer real: copia byte a byte para evitar dependencia de memmove. */
+    uint8_t *fb = (uint8_t *) (uint64_t) VBE_mode_info->framebuffer;
+    uint32_t pitch = VBE_mode_info->pitch;
+    uint32_t bpp   = VBE_mode_info->bpp / 8;
+    uint64_t srcRow = pixelRows;
+    for (uint64_t dst = 0; dst < (uint64_t)h - pixelRows; dst++, srcRow++) {
+        uint8_t *d = fb + dst    * pitch;
+        uint8_t *s = fb + srcRow * pitch;
+        for (uint32_t i = 0; i < w * bpp; i++) d[i] = s[i];
+    }
+    /* Rellenar franja inferior. */
+    uint8_t r = (fillColor >> 16) & 0xFF;
+    uint8_t g = (fillColor >> 8)  & 0xFF;
+    uint8_t b =  fillColor        & 0xFF;
+    for (uint64_t y = (uint64_t)h - pixelRows; y < h; y++) {
+        uint8_t *row = fb + y * pitch;
+        for (uint32_t x = 0; x < w; x++) {
+            row[x * bpp + 0] = b;
+            row[x * bpp + 1] = g;
+            row[x * bpp + 2] = r;
+        }
+    }
+}

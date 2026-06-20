@@ -1,22 +1,23 @@
 /*
- * Scheduler 
+ * Scheduler.
  *
  * Estructuras:
  *   - processTable[pid] -> Process (puntero opaco); slot vacío = NULL.
- *   - readyQueue: cola FIFO de PIDs en estado READY
+ *   - readyQueue: cola FIFO de PIDs en estado READY.
+ *   - foregroundSet[pid]: 1 si el proceso está en foreground (lo lanzó el shell sin '&').
  *
  * Procesos especiales:
  *   - IDLE_PID (0): proceso while(1)_hlt; corre cuando readyQueue está vacía.
  *   - INIT_PID (1): proceso que llama a wait_any en loop, reapeando huérfanos.
- *
  */
 #include <scheduler.h>
 #include <process.h>
+#include <fileAccess.h>
 #include <queue.h>
 #include <semaphore.h>
 #include <memoryManager.h>
-#include <interrupts.h>     
-#include <timer.h>         
+#include <interrupts.h>
+#include <timer.h>
 #include <stdint.h>
 
 #define KERNEL_CS       0x8
@@ -24,6 +25,7 @@
 #define INITIAL_RFLAGS  0x202
 
 static Process processTable[MAX_PROCESSES] = {0};
+static uint8_t foregroundSet[MAX_PROCESSES] = {0};
 static Process currentProcess  = 0;
 static Queue   readyQueue      = 0;
 static int     schedulerEnabled = 0;
@@ -39,37 +41,31 @@ static void prepareStack(Process process) {
     uint64_t *sp = getRSP(process);
     uint64_t stackPointerValue = (uint64_t) sp;
 
-    /* Alineación si hace falta. */
     uint64_t mis = getStackMisalignment(process);
     sp = (uint64_t *)((uint64_t)sp - mis);
 
-    /* Marco iretq. */
     *(--sp) = (uint64_t) KERNEL_SS;
-    *(--sp) = stackPointerValue;            
+    *(--sp) = stackPointerValue;
     *(--sp) = (uint64_t) INITIAL_RFLAGS;
     *(--sp) = (uint64_t) KERNEL_CS;
-    *(--sp) = (uint64_t) getRIP(process);    
+    *(--sp) = (uint64_t) getRIP(process);
 
-    /* rax,rbx,rcx,rdx,rbp */
     for (int i = 0; i < 5; i++) *(--sp) = 0;
 
     *(--sp) = (uint64_t)(uint32_t) getArgc(process);     /* rdi */
     *(--sp) = (uint64_t) getArgv(process);               /* rsi */
-    
-    /* r8..r15 */
+
     for (int i = 0; i < 8; i++) *(--sp) = 0;
 
     setRSP(process, sp);
 }
 
-/* Encuentra el primer PID libre. Devuelve -1 si la tabla está llena. */
 static pid_t findFreePid(void) {
     for (pid_t i = 0; i < MAX_PROCESSES; i++)
         if (processTable[i] == 0) return i;
     return -1;
 }
 
-/* Crea un proceso con un PID específico (uso interno: idle/init). */
 static pid_t startNewProcessWithPid(ProcessEntryPoint entryPoint, char *name,
                                     uint8_t priorityLevel, pid_t pid,
                                     int argc, char **argv) {
@@ -81,8 +77,9 @@ static pid_t startNewProcessWithPid(ProcessEntryPoint entryPoint, char *name,
     if (currentProcess && getPID(currentProcess) != IDLE_PID) {
         setPPID(process, getPID(currentProcess));
         addChild(currentProcess, pid);
+        copyFdTable(process, currentProcess);   /* hereda fds + addFileRef */
     } else {
-        setPPID(process, INIT_PID);    /* idle/init/primer proceso: padre = init */
+        setPPID(process, INIT_PID);
     }
     prepareStack(process);
     setState(process, READY);
@@ -92,14 +89,15 @@ static pid_t startNewProcessWithPid(ProcessEntryPoint entryPoint, char *name,
 }
 
 void initializeScheduler(ProcessEntryPoint initProcessEntry) {
-    for (int i = 0; i < MAX_PROCESSES; i++) processTable[i] = 0;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        processTable[i] = 0;
+        foregroundSet[i] = 0;
+    }
     readyQueue = newQueue();
     currentProcess = 0;
     schedulerEnabled = 0;
 
-    /* idle: PID 0. */
     startNewProcessWithPid(idleProcessEntry, "idle", 1, IDLE_PID, 0, 0);
-    /* init: PID 1, llama a wait_any en loop reapeando huérfanos. */
     startNewProcessWithPid(initProcessEntry, "init", 1, INIT_PID, 0, 0);
 }
 
@@ -110,6 +108,24 @@ pid_t startNewProcess(ProcessEntryPoint entryPoint, char *name,
     pid_t pid = findFreePid();
     if (pid < 0) return -1;
     return startNewProcessWithPid(entryPoint, name, priorityLevel, pid, argc, argv);
+}
+
+pid_t startNewProcessWithFds(ProcessEntryPoint entryPoint, char *name,
+                             uint8_t priorityLevel, int argc, char **argv,
+                             fd_override_t *overrides, int overrideCount) {
+    pid_t pid = startNewProcess(entryPoint, name, priorityLevel, argc, argv);
+    if (pid < 0 || !overrides) return pid;
+    Process child = processTable[pid];
+    if (!child) return pid;
+    for (int i = 0; i < overrideCount; i++) {
+        fd_override_t o = overrides[i];
+        if (o.targetFd == -1) {
+            closeFd(child, o.affectedFd);
+        } else {
+            dupFd(child, o.targetFd, o.affectedFd);
+        }
+    }
+    return pid;
 }
 
 void forceSchedulerCall(void) { _forceTimerInt(); }
@@ -123,13 +139,14 @@ int getProcessInfo(ProcessInfo *buffer, int maxCount) {
     for (int i = 0; i < MAX_PROCESSES && count < maxCount; i++) {
         Process p = processTable[i];
         if (p == 0) continue;
-        buffer[count].pid       = getPID(p);
-        buffer[count].ppid      = getPPID(p);
-        buffer[count].state     = getState(p);
-        buffer[count].name      = getProcessName(p);
-        buffer[count].priority  = getPriority(p);
-        buffer[count].rsp       = getRSP(p);
-        buffer[count].stackBase = getProcessStackBase(p);
+        buffer[count].pid          = getPID(p);
+        buffer[count].ppid         = getPPID(p);
+        buffer[count].state        = getState(p);
+        buffer[count].name         = getProcessName(p);
+        buffer[count].priority     = getPriority(p);
+        buffer[count].inForeground = foregroundSet[i];
+        buffer[count].rsp          = getRSP(p);
+        buffer[count].stackBase    = getProcessStackBase(p);
         count++;
     }
     return count;
@@ -157,8 +174,8 @@ int setReady(pid_t pid) {
     if (pid < 0 || pid >= MAX_PROCESSES) return -1;
     Process p = processTable[pid];
     if (!p) return -1;
-    State s = getState(p);
-    if (s != RUNNING && s != BLOCKED) return -1;
+
+    if (getState(p) != BLOCKED) return -1;
     enqueue(readyQueue, (void *)(intptr_t)pid);
     setState(p, READY);
     return 0;
@@ -171,16 +188,14 @@ int setPriorityOnPID(pid_t pid, uint8_t priority) {
     return 0;
 }
 
-/* Libera el PCB de un proceso ZOMBIE y libera su PID. */
 static void reapProcess(pid_t pid) {
     if (pid < 0 || pid >= MAX_PROCESSES) return;
     if (!processTable[pid]) return;
     freeProcess(processTable[pid]);
     processTable[pid] = 0;
+    foregroundSet[pid] = 0;
 }
 
-/* Reparenta todos los hijos vivos de `process` a init; los que ya son ZOMBIE quedan
- * encolados en terminatedChildren de init para que wait_any los reapee. */
 static void transferOrphanChildren(Process process) {
     Queue   children = getChildren(process);
     Process initProc = processTable[INIT_PID];
@@ -199,7 +214,6 @@ static void transferOrphanChildren(Process process) {
     }
 }
 
-/* Notifica al padre que el proceso terminó (postea sus semáforos y encola en su lista). */
 static void notifyTermination(Process process, Process parent, pid_t pid) {
     setState(process, ZOMBIE);
     removeFromQueue(readyQueue, (void *)(intptr_t)pid, comparePIDs);
@@ -218,12 +232,28 @@ int terminateProcess(pid_t pid) {
     Process parent = (ppid >= 0 && ppid < MAX_PROCESSES) ? processTable[ppid] : 0;
     if (!parent) return -1;
 
+    closeFdsOf(pid);
+    foregroundSet[pid] = 0;
     notifyTermination(process, parent, pid);
     transferOrphanChildren(process);
 
-    /* Si el que terminó es el actual, ceder el CPU (no vuelve nunca a este punto). */
     if (currentProcess && getPID(currentProcess) == pid) forceSchedulerCall();
     return 0;
+}
+
+void killFromIsr(pid_t pid) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return;
+    if (isUnkillable(pid)) return;
+    Process process = processTable[pid];
+    if (!process) return;
+    pid_t   ppid   = getPPID(process);
+    Process parent = (ppid >= 0 && ppid < MAX_PROCESSES) ? processTable[ppid] : 0;
+    if (!parent) return;
+
+    closeFdsOf(pid);
+    foregroundSet[pid] = 0;
+    notifyTermination(process, parent, pid);
+    transferOrphanChildren(process);
 }
 
 void wait_pid(pid_t pid) {
@@ -233,9 +263,10 @@ void wait_pid(pid_t pid) {
     pid_t   ppid   = getPPID(process);
     Process parent = (ppid >= 0 && ppid < MAX_PROCESSES) ? processTable[ppid] : 0;
 
-    semWait(getTerminated(process));   /* despierta cuando process termine */
+    semWait(getTerminated(process));
 
     if (parent) {
+        semTryWait(getChildTerminated(parent));
         removeFromQueue(getTerminatedChildren(parent), (void *)(intptr_t)pid, comparePIDs);
         removeChild(parent, pid);
     }
@@ -251,9 +282,127 @@ void wait_any(void) {
     reapProcess(pid);
 }
 
-/* ---------- Scheduling ---------- */
+void reap_zombies(void) {
+    if (!currentProcess) return;
 
-/* Saca el próximo PID READY de la cola; si está vacía, devuelve idle. */
+    while (semTryWait(getChildTerminated(currentProcess)) == 0) {
+        pid_t pid = (pid_t)(intptr_t) pollQueue(getTerminatedChildren(currentProcess));
+        if (pid < 0 || pid >= MAX_PROCESSES) continue;
+        removeChild(currentProcess, pid);
+        reapProcess(pid);
+    }
+}
+
+FileAccess getCurrentFd(int fd) {
+    if (!currentProcess) return 0;
+    return getFd(currentProcess, fd);
+}
+
+int addCurrentFd(FileAccess fa) {
+    if (!currentProcess) return -1;
+    return addFd(currentProcess, fa);
+}
+
+int openCurrentFd(FileAccess fa, int fd) {
+    if (!currentProcess) return -1;
+    return openFd(currentProcess, fa, fd);
+}
+
+int closeCurrentFd(int fd) {
+    if (!currentProcess) return -1;
+    return closeFd(currentProcess, fd);
+}
+
+int dupCurrentFd(int oldFd, int newFd) {
+    if (!currentProcess) return -1;
+    return dupFd(currentProcess, oldFd, newFd);
+}
+
+int reopenCurrentFd(int fd) {
+    if (!currentProcess) return -1;
+    return reopenFd(currentProcess, fd);
+}
+
+int64_t readFdOnPID(pid_t pid, int fd, char *buf, uint64_t count) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    return readFd(processTable[pid], fd, buf, count);
+}
+
+int64_t writeFdOnPID(pid_t pid, int fd, const char *buf, uint64_t count) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    return writeFd(processTable[pid], fd, buf, count);
+}
+
+int requestEofOnPID(pid_t pid, int fd) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    return requestEofOf(processTable[pid], fd);
+}
+
+FileAccess getFdOnPID(pid_t pid, int fd) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return 0;
+    return getFd(processTable[pid], fd);
+}
+
+int addFdToPID(pid_t pid, FileAccess fa) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    return addFd(processTable[pid], fa);
+}
+
+int closeFdOnPID(pid_t pid, int fd) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    return closeFd(processTable[pid], fd);
+}
+
+int dupFdOnPID(pid_t pid, int oldFd, int newFd) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    return dupFd(processTable[pid], oldFd, newFd);
+}
+
+void closeFdsOf(pid_t pid) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return;
+    closeAllFDs(processTable[pid]);
+}
+
+int64_t read(int fd, char *buf, uint64_t count) {
+    pid_t pid = getCurrentPID();
+    if (pid < 0) return -1;
+    return readFdOnPID(pid, fd, buf, count);
+}
+
+int64_t write(int fd, const char *buf, uint64_t count) {
+    pid_t pid = getCurrentPID();
+    if (pid < 0) return -1;
+    return writeFdOnPID(pid, fd, buf, count);
+}
+
+
+int addToFG(pid_t pid) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    if (!processTable[pid] || foregroundSet[pid]) return -1;
+    foregroundSet[pid] = 1;
+    return 0;
+}
+
+int removeFromFG(pid_t pid) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    if (!foregroundSet[pid]) return -1;
+    foregroundSet[pid] = 0;
+    return 0;
+}
+
+int isInFG(pid_t pid) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return 0;
+    return foregroundSet[pid];
+}
+
+void forEachInFG(ActionOnPID action) {
+    if (!action) return;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (foregroundSet[i]) action((pid_t) i);
+    }
+}
+
+
 static pid_t getNextPID(void) {
     if (isQueueEmpty(readyQueue)) return IDLE_PID;
     return (pid_t)(intptr_t) pollQueue(readyQueue);
@@ -263,7 +412,6 @@ uint64_t schedule(uint64_t prevRSP) {
     timer_handler();
     if (!schedulerEnabled) return prevRSP;
     if (!currentProcess) {
-        /* Primer arranque: tomar el primer READY. */
         pid_t nextPid = getNextPID();
         currentProcess = processTable[nextPid];
         setState(currentProcess, RUNNING);
@@ -274,7 +422,6 @@ uint64_t schedule(uint64_t prevRSP) {
 
     setRSP(currentProcess, (uint64_t *) prevRSP);
 
-    /* Si sigue RUNNING y le queda quantum, no hacemos context switch. */
     if (getState(currentProcess) == RUNNING) {
         if (hasQuantums(currentProcess)) {
             useQuantum(currentProcess);
@@ -283,7 +430,6 @@ uint64_t schedule(uint64_t prevRSP) {
         setState(currentProcess, READY);
         enqueue(readyQueue, (void *)(intptr_t) getPID(currentProcess));
     }
-    /* Si está BLOCKED, ZOMBIE o ya está fuera de la cola: context switch. */
 
     pid_t nextPid = getNextPID();
     currentProcess = processTable[nextPid];

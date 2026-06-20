@@ -1,23 +1,19 @@
-#ifndef CONSOLE_H
-#define CONSOLE_H
-#include <stdint.h>
+/*
+ * shell.h — Shell interactiva en userland.
+ *
+ * Lee del STDIN del proceso (cableado por el init al pipe del teclado) y produce salida
+ * al STDOUT (cableado por el propio shell a un pipe que va al proceso Terminal). Los
+ * comandos se ejecutan como procesos hijos que heredan los 3 fds.
+ */
+#ifndef SHELL_H
+#define SHELL_H
 
 #define MAX_COMMAND_LENGTH 128
 
-void initializeShell();
-void inputMode(int acceptsEmpty);
-void clearScreen();
+/* Entry point del shell process. */
+int shellProcess(int argc, char **argv);
 
-uint32_t getBackgroundColor();
-void setBackgroundColor(uint32_t color);
-uint32_t getForegroundColor();
-void setForegroundColor(uint32_t color);
-void setHighlightColor(uint32_t color);
-void setScale(int scale);
-void printOutput();
-
-void resetBackgroundColor();
-void resetForegroundColor();
-void resetHighlightColor();
+/* Para uso de los comandos: limpia el terminal mandando el FF. */
+void terminalClear(void);
 
 #endif

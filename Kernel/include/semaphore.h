@@ -20,6 +20,10 @@ int semWait(Semaphore semaphore);
 /* Incrementa el valor; si había procesos bloqueados, despierta al primero. */
 int semPost(Semaphore semaphore);
 
+/* Decrementa el valor sólo si es > 0 (no bloquea). Devuelve 0 si tomó el recurso,
+ * -1 si no había disponible. Útil para chequeos no-bloqueantes (p. ej. reap de bg). */
+int semTryWait(Semaphore semaphore);
+
 /* Libera la memoria del semáforo. No hace nada si todavía hay procesos bloqueados. */
 void freeSemaphore(Semaphore semaphore);
 
