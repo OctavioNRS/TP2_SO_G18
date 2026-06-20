@@ -1,3 +1,9 @@
+/*
+ * videoDriver.h — Primitivas de dibujo sobre el framebuffer VESA.
+ *
+ * Coordenadas en píxeles (x crece a la derecha, y hacia abajo). Los glifos del
+ * font tienen 8x16 píxeles; `scale` permite agrandarlos por múltiplo entero.
+ */
 #ifndef VIDEO_DRIVER_H
 #define VIDEO_DRIVER_H
 #include <stdint.h>

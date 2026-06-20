@@ -1,5 +1,26 @@
 /*
- * terminal.c
+ * terminal.c — Proceso de userland que renderiza al framebuffer lo que llega
+ * por su STDIN.
+ *
+ * El shell crea un pipe shell→terminal y lanza el proceso terminal con su STDIN
+ * apuntando al read-end. Cada byte que llega se dibuja con `sys_draw_char` a la
+ * posición del cursor (col, row); al pasarse de columnas hace newline y al
+ * pasarse de filas hace `sys_scroll_up`.
+ *
+ * Caracteres de control reconocidos:
+ *   '\n'  → newline
+ *   '\r'  → carriage return
+ *   '\b'  → backspace (borra el carácter previo)
+ *   '\t'  → tab (TAB_WIDTH espacios)
+ *   '\f'  → form feed (limpia pantalla + reset cursor)
+ *   '\0'  → ignorado (lo inyecta el ISR del teclado en Ctrl+D para destrabar reads)
+ *   0x1B  → arranca una escape sequence `\033<cmd><payload>;`
+ *
+ * Escape sequences soportadas:
+ *   \033c;            limpia pantalla
+ *   \033f<6hex>;      setea foreground color
+ *   \033b<6hex>;      setea background color (y limpia)
+ *   \033r;            reset de colores a defaults
  */
 #include <terminal.h>
 #include <syscalls.h>

@@ -1,3 +1,10 @@
+/*
+ * soundDriver.c — PC Speaker vía PIT canal 2 + puerto 0x61.
+ *
+ * `playSound(frequency, duration_ms)` programa el PIT para generar la onda
+ * cuadrada, habilita los bits del speaker en el puerto 0x61, espera la duración
+ * con `sleep` activo del timer, y deshabilita el speaker al final.
+ */
 #include <soundDriver.h>
 #include <timer.h>
 #include <interrupts.h>

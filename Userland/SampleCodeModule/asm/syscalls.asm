@@ -1,3 +1,9 @@
+; syscalls.asm — Wrappers en ensamblador para cada syscall del kernel.
+;
+; Cada `sys_<nombre>` mueve el número de syscall a rax, traslada el cuarto
+; argumento de rcx a r10 (porque `int` clobberea rcx), dispara `int 0x80` y
+; retorna el resultado en rax. El kernel los recibe en `syscallDispatcher.c`.
+
 GLOBAL sys_read, sys_write, sys_draw_rect, sys_draw_circle, sys_draw_char
 GLOBAL sys_screen_width, sys_screen_height, sys_background, sys_video_aux, sys_render_aux
 GLOBAL sys_sleep, sys_draw_string, sys_get_key, sys_play_sound, sys_date, sys_time, sys_kernel_time

@@ -1,3 +1,8 @@
+/*
+ * hexColors.h — Constantes de color RGB 24-bit y macros para las escape
+ * sequences que interpreta el terminal de userland (`\033f<hex>;` foreground,
+ * `\033b<hex>;` background, `\033r;` reset, `\033c;` clear).
+ */
 #ifndef HEXCOLORS_H
 #define HEXCOLORS_H
 #include <stdint.h>

@@ -1,3 +1,9 @@
+/*
+ * dateTime.c — Lectura del RTC (Real Time Clock) por puertos CMOS 0x70/0x71.
+ *
+ * El RTC devuelve los valores en BCD (cada dígito ocupa 4 bits); las helpers
+ * convierten a decimal antes de devolver hora/fecha por punteros.
+ */
 #include <stdint.h>
 #include <lib.h>
 #include <dateTime.h>

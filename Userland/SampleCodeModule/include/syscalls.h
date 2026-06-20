@@ -1,3 +1,11 @@
+/*
+ * syscalls.h — Declaraciones de las syscalls del userland.
+ *
+ * Cada `sys_*` mapea a su número de syscall en `asm/syscalls.asm`, que las
+ * dispara con `int 0x80` y las despacha en `syscallDispatcher.c` del kernel.
+ * También define los fds estándar (STDIN/STDOUT/STDERR), los structs públicos
+ * (ProcessInfo, MemoryInfo, fd_override_t) y los enums de estado de proceso.
+ */
 #ifndef SYSCALLS_H
 #define SYSCALLS_H
 #include <stdint.h>

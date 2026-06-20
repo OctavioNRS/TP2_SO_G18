@@ -1,3 +1,6 @@
+/*
+ * dateTime.h — Lectura de hora/fecha desde el RTC (CMOS 0x70/0x71).
+ */
 #ifndef DATE_TIME_H
 #define DATE_TIME_H
 

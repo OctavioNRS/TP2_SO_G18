@@ -1,3 +1,10 @@
+/*
+ * lib.c — Implementaciones mínimas de utilidades estándar del kernel.
+ *
+ * Incluye `memset`, `memcpy`, `strcmp`, `strcpy`, `strlen`, `uint64ToHex` y
+ * `concat_strings`. Sustituyen a la libc, que no está disponible en este
+ * entorno freestanding (-nostdlib).
+ */
 #include <stdint.h>
 
 void * memset(void * destination, int32_t c, uint64_t length)

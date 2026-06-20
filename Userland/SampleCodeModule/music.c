@@ -1,3 +1,10 @@
+/*
+ * music.c — Partituras hardcodeadas para reproducir por el speaker PC.
+ *
+ * Cada canción es un arreglo de `Note { frecuencia, duración_ms }` que
+ * `play_song` recorre llamando a `sys_play_sound` con un pequeño "finger delay"
+ * entre notas. Lo usan el comando `music` y el easter egg `ls`.
+ */
 #include <syscalls.h>
 #include <music.h>
 #include <cstandard.h>

@@ -1,3 +1,6 @@
+/*
+ * keyboardDriver.h — API del driver de teclado y constantes de fds estándar.
+ */
 #ifndef _KEYBOARD_DRIVER_H
 #define _KEYBOARD_DRIVER_H
 #include <stdint.h>

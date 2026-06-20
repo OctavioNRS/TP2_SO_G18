@@ -1,3 +1,12 @@
+/*
+ * syscallDispatcher.c — Tabla de system calls + wrappers individuales.
+ *
+ * El stub `_syscall` (interrupts.asm) entra desde `int 0x80`, pone el número
+ * de syscall en rax y los argumentos en rdi/rsi/rdx/r10/r8/r9, y llama a
+ * `syscallDispatcher`. Acá se indexa la tabla `syscalls[]` y se invoca el
+ * wrapper concreto, que reenvía al subsistema correspondiente (video, fs,
+ * scheduler, ipc, etc.).
+ */
 #include <stdint.h>
 #include <videoDriver.h>
 #include <keyboardDriver.h>

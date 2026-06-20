@@ -1,3 +1,7 @@
+/*
+ * music.h — TAD `Song` (lista de `Note` + BPM) y partituras predefinidas para
+ * reproducir por el PC Speaker vía `sys_play_sound`.
+ */
 #ifndef MUSIC_H
 #define MUSIC_H
 

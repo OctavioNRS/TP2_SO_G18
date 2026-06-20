@@ -1,307 +1,447 @@
-# TP2 — Sistemas Operativos Grupo 18
-Implementación de un kernel monolítico de 64 bits sobre x64BareBones (Pure64) con
-manejo de interrupciones, system calls, drivers de teclado y video gráfico,
-administración de memoria intercambiable, scheduler Round Robin con prioridades,
-semáforos, pipes y un shell de usuario.
+# TP2 — 72.11 Sistemas Operativos — 2C 2025
+
+Implementación de un sistema operativo monolítico de 64 bits sobre x64BareBones
+(Pure64). El kernel administra interrupciones, system calls, drivers de teclado y
+video gráfico, dos administradores de memoria intercambiables (free list y buddy
+con árbol), un scheduler Round Robin con prioridades, semáforos contadores y
+nombrados, pipes con FIFO bloqueante, y file descriptors por proceso. En userland
+corre un shell interactivo con soporte para pipelines y procesos en background, y
+un proceso terminal aparte que renderiza la salida a framebuffer.
 
 ## Integrantes
 
-- Octavio Roberts Sanchez
+- Octavio Roberts Sanchez — Grupo 18
 
-## Compilación y ejecución
+## Instrucciones de Compilación y Ejecución
 
-### Requisitos del entorno
+### Requisitos Previos
 
-Para compilar, se necesitan las siguientes dependencias instaladas:
+Para compilar nativamente se necesitan los siguientes paquetes:
 
 ```bash
 sudo apt-get install nasm qemu-system-x86 gcc make
 ```
 
-### Compilacion
+Alternativamente, el repo trae un `Dockerfile` con la imagen
+`agodio/itba-so-multiarch:3.1` que provee la toolchain x86_64-linux-gnu lista.
 
-Las reglas `make`, `make all`, `make buddy` están reservadas para la
-compilación dentro del contenedor; cualquier otra tarea (bajar la imagen,
-iniciar Docker, arrancar QEMU) se hace con scripts/recetas dedicadas.
+### Compilación
 
-| Comando | Acción |
-| --- | --- |
-| `make all` (default) | Compila con el memory manager por defecto (**free list** con coalescing). |
-| `make buddy`         | Compila con el **Buddy System** (`-DUSE_BUDDY`). |
-| `make clean`         | Limpia los `.o`, `.bin` y la imagen. |
+Hay dos variantes del administrador de memoria que se compilan con reglas
+separadas:
 
-### Construir + arrancar QEMU
-
-Desde el host:
-
+**Compilación estándar (free list con coalescing):**
 ```bash
-docker run --rm -v "$PWD":/src -w /src agodio/itba-so-multiarch:3.1 make clean all
-./run.sh           # arranca QEMU con la imagen recién compilada
-./run.sh buddy     # idem, pero usando el Buddy System como memory manager
+make clean all
 ```
 
-`run.sh` lanza `qemu-system-x86_64 -hda Image/x64BareBonesImage.qcow2 -m 4096`
-con audio para soporte del speaker (comando `music`).
+**Compilación con Buddy System:**
+```bash
+make clean buddy
+```
 
-## Arquitectura
+El build genera secuencialmente:
 
-- **Bootloader**: Pure64 carga el kernel en `0x100000`. El primer objeto del
-  link es `Kernel/asm/loader.o` (la directiva `OUTPUT_FORMAT("binary")` del
-  linker script obliga a que el entry esté al inicio del binario).
-- **Kernel** monolítico de 64 bits en modo largo (ring 0 sin separación de
-  privilegios). Provee drivers de teclado, video gráfico, RTC, speaker y
-  manejo de excepciones (división por cero, opcode inválido).
-- **Procesos** en kernel-space comparten el espacio de direcciones; cada uno
-  tiene su propio stack de 32 KiB.
-- **Userland**: un único módulo (`0000-sampleCodeModule.bin`) que cargado en
-  `0x400000` arranca el shell. El bootstrap del sistema es:
+1. El bootloader Pure64 + BMFS (`Bootloader/`)
+2. El kernel (`Kernel/kernel.bin`)
+3. El módulo de userland (`Userland/0000-sampleCodeModule.bin`)
+4. La imagen del disco (`Image/x64BareBonesImage.qcow2`)
 
-  ```text
-  kernel main → init (PID 1, kernel) → shell (PID 2, userland) → terminal (PID 3, userland)
-  ```
+### Ejecución
 
-  El proceso `init` crea el pipe del teclado, conecta el ISR al lado de
-  escritura del pipe y lanza el shell. El shell, a su vez, crea un pipe
-  hacia un proceso `terminal` que se encarga del render TTY al framebuffer.
+Para correr el sistema operativo con el memory manager por defecto:
 
-### Mecanismos implementados
+```bash
+./run.sh
+```
 
-- **Administradores de memoria intercambiables**: free list (default) y buddy
-  system (`make buddy`). Ambos comparten la interfaz `mem_init`/`mem_alloc`/
-  `mem_free`/`mem_status` definida en `Kernel/include/memoryManager.h`. La
-  selección se hace por preprocesador con `#ifdef USE_BUDDY`.
-- **Scheduler Round Robin con prioridades**: cada proceso tiene un valor de
-  prioridad que define la cantidad de quantums por turno. Ready queue FIFO.
-  PID 0 (`idle`) corre cuando no hay nadie listo; PID 1 (`init`) reapea
-  huérfanos mediante `wait_any` en loop.
-- **System calls**: int `0x80`. La tabla completa está en
-  `Kernel/syscallDispatcher.c` (43 syscalls).
-- **Semáforos**: bloqueantes, sin busy-wait, atomicidad con spinlock atómico
-  (`__atomic_exchange_n`). Pueden ser compartidos entre procesos no
-  relacionados acordando un identificador por nombre (`sys_sem_open`).
-- **Pipes**: unidireccionales, lectura y escritura bloqueantes, buffer
-  circular (`PIPE_BUF_SIZE = 1024`). El TAD está dividido en capas:
-  - `CircularBuffer` (FIFO puro de bytes, sin sincronización).
-  - `Pipe` (CircularBuffer + 4 semáforos: `dataAvailable`, `freeSpaces`,
-    `readMutex`, `writeMutex` + contadores `refCount` y `writerCount`).
-  - `FileAccess` (Pipe + flags `FILE_READ`/`FILE_WRITE`/`FILE_NONBLOCK` +
-    refcount propio). Es lo que vive en la tabla de fds del proceso.
+Para correrlo con el Buddy System:
 
-  Cada proceso tiene una tabla de file descriptors (`MAX_FDS = 16`) donde
-  cada slot apunta a un `FileAccess`. `read`/`write` son transparentes: para
-  un proceso es indistinto leer/escribir de un pipe o de la "terminal" (todo
-  va vía pipes, terminal incluido). Cuando el último writer cierra,
-  `removePipeWriter` despierta a los readers bloqueados para que detecten
-  EOF.
-- **Soporte de Ctrl+C y Ctrl+D**: ver sección "Atajos de teclado".
+```bash
+./run.sh buddy
+```
 
-## Replicación
+`run.sh` limpia builds previos, recompila, lanza QEMU con la imagen generada y
+deja la pantalla del kernel en una ventana de QEMU; al cerrarse, hace un `make
+clean` final.
 
-### Comandos del shell
+## Instrucciones de Replicación
 
-Cada comando se ejecuta como un proceso independiente. Los que aparecen como
-*pipeable* leen STDIN / escriben STDOUT, y por lo tanto se pueden conectar con
-`|` u operar sobre la terminal de forma transparente.
+### Comandos Disponibles
 
-| Nombre | Parámetros | Descripción |
-| --- | --- | --- |
-| `help` | — | Lista todos los comandos disponibles. |
-| `clear` | — | Limpia la pantalla. |
-| `echo` | `<args...>` | Imprime sus argumentos separados por espacio + `\n`. |
-| `datetime` | — | Hora y fecha actual (lee el RTC). |
-| `registers` | — | Imprime el último snapshot de registros (ver F6 abajo). |
-| `ls` | — | "No file system" (gag con la canción de Rickroll). |
-| `music` | `r`\|`c` | Reproduce Rickroll (`r`) o Coffin Dance (`c`) en el speaker. |
-| `zero` | — | Provoca una división por cero (testea exc. 0). |
-| `invalid` | — | Provoca un opcode inválido (testea exc. 6). |
-| `ps` | — | Lista los procesos (PID, PPID, prioridad, estado, nombre). |
-| `mem` | — | Estado del heap: total / ocupada / libre / fragmentos. |
-| `loop` | `[secs]` | Imprime su PID cada `secs` segundos (default 1) por espera **activa**. |
-| `kill` | `<pid>` | Termina al proceso con ese PID. |
-| `nice` | `<pid> <prio>` | Cambia la prioridad de un proceso. `prio` debe ser `> 0`. |
-| `block` | `<pid>` | Toggle: si está corriendo lo bloquea; si está bloqueado lo desbloquea. |
-| `cat`  | — | Imprime su STDIN tal cual lo recibe. |
-| `wc`  | — | Cuenta líneas, palabras y caracteres del STDIN. |
-| `filter` | — | Filtra las vocales del STDIN. |
-| `mvar` | `<writers> <readers>` | MVar de Haskell (ver más abajo). |
-| `test_mm` | `<max_bytes>` | Stress del memory manager. |
-| `test_proc` | `<max_procs>` | Stress del scheduler. |
-| `test_prio` | `<max_value>` | 3 procesos con prioridades distintas contando hasta `max_value`. |
-| `test_sync` | `<n_iter>` | Race conditions con y sin semáforos. |
+#### Comandos del shell
 
-#### Notas particulares
+| Comando | Descripción | Parámetros | Uso |
+|---------|-------------|------------|-----|
+| `help`      | Lista los comandos disponibles y los tests. | Ninguno | `help` |
+| `clear`     | Limpia la pantalla (manda `\f` al terminal). | Ninguno | `clear` |
+| `echo`      | Escribe sus argumentos en STDOUT. | `<texto…>` | `echo hola mundo` |
+| `datetime`  | Imprime la fecha y hora actuales del RTC. | Ninguno | `datetime` |
+| `registers` | Imprime el snapshot de registros capturado con F6. | Ninguno | `registers` |
+| `ls`        | "Lista" archivos (easter egg). | Ninguno | `ls` |
+| `music`     | Reproduce una canción por el speaker PC. | `<r\|c>` (r=Rickroll, c=Coffin) | `music r` |
+| `zero`      | Provoca una división por cero (excepción \#0). | Ninguno | `zero` |
+| `invalid`   | Provoca un opcode inválido (excepción \#6). | Ninguno | `invalid` |
+| `ps`        | Lista todos los procesos con PID, PPID, prioridad, foreground, estado, RSP, stack base y nombre. | Ninguno | `ps` |
+| `mem`       | Muestra el estado del heap (total, ocupado, libre, fragmentos). | Ninguno | `mem` |
+| `loop`      | Imprime el PID con un saludo cada N segundos (espera activa). | `[segundos]` (default 1) | `loop 3` |
+| `kill`      | Mata un proceso por PID. | `<pid>` | `kill 5` |
+| `nice`      | Cambia la prioridad de un proceso. | `<pid> <prioridad>` | `nice 5 3` |
+| `block`     | Alterna el estado bloqueado/listo de un proceso (toggle). | `<pid>` | `block 5` |
+| `cat`       | Copia STDIN a STDOUT hasta EOF. | Ninguno | `cat` o `echo hola \| cat` |
+| `wc`        | Cuenta líneas, palabras y caracteres de STDIN. | Ninguno | `wc` o `echo "hola mundo" \| wc` |
+| `filter`    | Filtra las vocales de STDIN. | Ninguno | `filter` o `echo hola \| filter` |
+| `mvar`      | Spawnea writers/readers compartiendo un slot estilo Haskell MVar; cada reader pinta su letra con un color distinto. | `<writers> <readers>` | `mvar 2 3` |
 
-- **`cat`, `wc`, `filter`** en modo interactivo (sin `|`) **no hacen eco** de
-  lo tipeado: el sistema no tiene una capa TTY que duplique las pulsaciones,
-  así que en cuanto el shell deja de leer y empieza a leer el comando, los
-  caracteres tipeados van directo al pipe del proceso. Es esperado: en
-  pipelines (`echo hola | wc`) lo recibe correctamente y para terminar la
-  entrada hay que mandar EOF con Ctrl+D.
-- **`registers`** muestra el snapshot tomado en el momento en que se apretó
-  **F6**. F6 captura los registros del proceso interrumpido en ese instante.
-  Si nunca se apretó F6 el comando imprime "No snapshot taken".
+#### Tests de cátedra
 
-### Caracteres especiales
+| Comando | Descripción | Parámetros | Uso |
+|---------|-------------|------------|-----|
+| `test_mm`   | Stress del memory manager: aloca/libera bloques y verifica que no se solapen. | `<max_bytes>` | `test_mm 1000000` |
+| `test_proc` | Stress del scheduler: crea/bloquea/mata procesos. | `<max_procs>` | `test_proc 10` |
+| `test_prio` | Tres procesos con prioridades distintas contando hasta un máximo. | `<max_value>` | `test_prio 1000000` |
+| `test_sync` | Crea pares de procesos que incrementan/decrementan una variable global con y sin semáforos, con n iteraciones | `<pair_processes> <n_iter> <0|1>` | `test_sync 4 1000 1` |
 
-| Símbolo | Significado |
-| --- | --- |
-| `|` | Pipe entre dos procesos. Sólo se soporta **un** `|` por línea (consigna). |
-| `&` al final | Lanza el comando en background (el shell devuelve el prompt inmediatamente). |
+### Caracteres Especiales
+
+#### Pipes (`|`)
+
+El pipe conecta STDOUT de la etapa N con STDIN de la etapa N+1:
+
+```bash
+echo hola | wc
+cat | filter
+```
+
+El shell soporta **una sola** `|` por línea (máximo 2 etapas de pipeline).
+
+#### Ejecución en Background (`&`)
+
+`&` al final de la línea ejecuta el proceso sin esperar:
+
+```bash
+loop 3 &
+ps
+kill 4
+```
+
+`&` debe estar al final. El shell saca al proceso del foreground set, así Ctrl+C
+no lo afecta.
+
+### Atajos de Teclado
+
+| Atajo | Función | Descripción |
+|-------|---------|-------------|
+| `Ctrl+C` | Interrumpir foreground | Mata todos los procesos en foreground del shell. |
+| `Ctrl+D` | EOF en foreground | Marca EOF en STDIN de cada proceso foreground cuyo STDIN sea el pipe del teclado, y despierta los reads bloqueados con un `\0`. |
+| `F6` (Print Screen) | Snapshot de registros | Captura el contexto de CPU del momento; se imprime después con `registers`. |
+| `Backspace` | Borrar carácter | Borra el último carácter tipeado en la línea de comando. |
+
+### Escape Sequences del Terminal
+
+El terminal de userland interpreta secuencias `\033<cmd><payload>;` para
+control visual:
+
+| Secuencia | Efecto |
+|-----------|--------|
+| `\033c;`           | Limpia la pantalla. |
+| `\033f<6hex>;`     | Setea el color de foreground (6 dígitos hex RGB). |
+| `\033b<6hex>;`     | Setea el color de background (también limpia la pantalla). |
+| `\033r;`           | Reset de colores a defaults (blanco sobre negro). |
 
 Ejemplos:
 
-```text
-[SHELL] > echo hola mundo | wc          # pipea echo a wc
-[SHELL] > loop &                        # loop corriendo en background
-[SHELL] > test_proc 8 &                 # test en background, sigue interactivo
+```c
+sys_write(STDOUT, "\033fFF0000;ERROR\033r;\n", 19);  // ERROR en rojo
+sys_write(STDOUT, "\033c;", 3);                     // clear screen
 ```
 
-### Atajos de teclado
+`shell.c` y `mvar.c` los usan para colorear el prompt, el welcome, los
+mensajes de error y las letras que los readers de la MVar escriben.
 
-| Tecla | Acción |
-| --- | --- |
-| Ctrl+C | Mata todos los procesos en foreground (los del último comando sin `&`). |
-| Ctrl+D | Manda EOF al STDIN del proceso en foreground cuyo STDIN sea el teclado. En `cat`, `wc`, `filter` interactivos, hace que el comando termine. |
-| F6 | Toma un snapshot de los registros del proceso interrumpido. Verlo con `registers`. |
+### Ejemplos de Uso
 
-### Ejemplos de demostración
+#### Ejemplo 1: Pipeline simple
+```bash
+echo hola mundo | wc
+```
+Salida: `1 lineas, 2 palabras, 11 caracteres`
 
-A continuación, ejemplos por fuera de los tests provistos para mostrar cada
-requerimiento.
+#### Ejemplo 2: Filtrar vocales
+```bash
+echo abracadabra | filter
+```
+Salida: `brcdbr`
 
-#### IPC: pipes
+#### Ejemplo 3: Ejecución en background
+```bash
+loop 2 &
+ps
+```
+Muestra el proceso `loop` corriendo en background; el shell sigue aceptando
+comandos.
 
-```text
-[SHELL] > echo hola que tal | wc
-0 lineas, 3 palabras, 13 caracteres
-[SHELL] > echo abcdefghijklmnop | filter
-bcdfghjklmnp
+#### Ejemplo 4: Gestión de procesos
+```bash
+loop 5 &
+ps
+kill 3
+ps
+```
+Crea, lista, mata y verifica.
+
+#### Ejemplo 5: Snapshot de registros
+```
+[apretar F6 en cualquier momento]
+registers
+```
+Imprime los registros de CPU del instante en que se apretó F6.
+
+#### Ejemplo 6: MVar
+```bash
+mvar 2 3
+```
+Spawnea 2 escritores (letras A, B) y 3 lectores (cada uno con su color). El
+proceso `mvar` termina inmediatamente; los hijos quedan corriendo hasta que se
+los mata explícitamente con `kill`.
+
+#### Ejemplo 7: Test de memoria
+```bash
+test_mm 500000
+```
+Aloca/libera bloques hasta 500 KB y verifica que no se solapan ni se corrompen.
+
+#### Ejemplo 8: Test de sincronización
+```bash
+test_sync N 1000 1
+```
+N pares de procesos suman/restan sobre una variable global 1000 veces usando un semáforo
+nombrado; el resultado esperado es 0.
+
+#### Ejemplo 9: Cambio de prioridad
+```bash
+test_prio 1000000
+```
+Tres procesos con prioridades distintas cuentan hasta el mismo número; los de
+prioridad alta terminan antes.
+
+### Requerimientos Cumplidos
+
+Se cumplen todos los requerimientos de la consigna del TP:
+
+- **Memory Manager** con dos implementaciones intercambiables (free list y buddy
+  con árbol) seleccionables por make target.
+- **Procesos** con context switch por software, jerarquía padre/hijo, scheduler
+  Round Robin con prioridades por nivel de quantums, `block`/`unblock`, `kill`,
+  `nice`, `yield`, `waitpid`.
+- **Sincronización** por semáforos contadores con spinlock atómico y semáforos
+  nombrados compartidos por proceso.
+- **IPC** por pipes bloqueantes con tabla de file descriptors por proceso,
+  herencia de fds a hijos, override de fds al spawnear, y `dup`/`close`/`reopen`.
+- **Shell** en userland con parser de tokens, soporte de un `|` por línea, `&`
+  para background, eco con manejo de backspace, y reaping de zombies entre
+  prompts.
+- **Comandos** pedidos por la consigna (`help`, `clear`, `echo`, `ps`, `mem`,
+  `loop`, `kill`, `nice`, `block`, `cat`, `wc`, `filter`, `mvar`) y de cátedra
+  (`test_mm`, `test_proc`, `test_prio`, `test_sync`).
+
+## Limitaciones
+
+1. **Memoria:**
+   - Hay un máximo de **64 procesos simultáneos** (`MAX_PROCESSES = 64`).
+   - El tamaño máximo de un comando es **128 caracteres** (`MAX_COMMAND_LENGTH = 128`).
+   - El shell tokeniza a lo sumo **16 tokens por etapa** (`MAX_TOKENS = 16`).
+   - El Buddy System tiene un pool fijo de **8192 nodos** (`MAX_NODES = 8192`);
+     cargas muy fragmentadas pueden agotarlo.
+   - No hay detección contra stack overflow; un proceso que use más de los 32
+     KiB de stack producirá comportamiento indefinido.
+
+2. **File Descriptors:**
+   - Cada proceso tiene un máximo de **16 fds** abiertos simultáneamente
+     (`MAX_FDS = 16`).
+
+3. **Pipes:**
+   - Buffer circular interno de **1024 bytes** (`PIPE_BUF_SIZE = 1024`). Un
+     writer que escriba más rápido de lo que el reader consume se va a bloquear
+     cuando el buffer esté lleno.
+   - El shell soporta **una sola `|` por línea** (`MAX_PIPELINE = 2`).
+
+4. **Teclado:**
+   - Solo el layout US (QWERTY). No hay soporte de teclas dead, layouts
+     internacionales ni autorepeat configurable.
+   - No hay historial de comandos (las flechas no navegan).
+
+5. **Video:**
+   - Resolución y modo fijos por el bootloader Pure64.
+   - Asume framebuffer lineal a 24/32 BPP; modos más exóticos pueden romper el
+     renderizado de glifos.
+   - No hay terminales múltiples ni ventanas: el terminal cubre la pantalla.
+
+6. **Hardware:**
+   - El sistema se desarrolló y probó en QEMU; en hardware real puede fallar.
+
+7. **Scheduler:**
+   - Round Robin con prioridades estáticas. La prioridad determina la cantidad
+     de quantums que recibe el proceso por turno, no hay aging ni boost de I/O.
+
+8. **Procesos:**
+   - Si un proceso muere por una causa externa (kill, Ctrl+C) sin liberar
+     memoria que haya alocado vía `sys_malloc`, esa memoria se filtra (el kernel
+     no escanea el heap del proceso).
+   - Si un proceso muere mientras tiene un semáforo tomado o esperándolo, se
+     pueden generar interbloqueos en el resto de los esperadores.
+   - No hay protección contra que el entry point de un proceso "retorne" sin
+     llamar a `sys_exit` (se cae al stack de basura).
+
+9. **Shell:**
+   - Un proceso background que escriba a STDOUT comparte el área visual del
+     prompt: la salida se intercala con lo que el usuario tipea.
+
+## Citas de Fragmentos de Código / Uso de IA
+
+**Nota importante:** Se utilizó IA durante el desarrollo para:
+- Discutir alternativas de diseño antes de codificar.
+- Documentar el código (docstrings y comentarios de bloque).
+- Ajustes de prolijidad, modularización y formateo.
+
+Toda la lógica funcional fue diseñada por el programador y codificada con ayuda de la IA como mano de obra unicamente, siempre con revision humana.
+
+### Fragmentos de Código Relevantes
+
+#### Spinlock atómico para semáforos
+
+El TAD `Semaphore` serializa su estado con un test-and-set atómico (`__atomic_exchange_n`)
+en lugar de cli/sti. En una arquitectura single-CPU con interrupciones por
+hardware, la ventana del lock dura pocas instrucciones; evitar cli/sti es
+crucial porque el ISR del teclado entra a `pipeWrite → semWait` y un `_sti`
+final rompería IF en el medio de la atención.
+
+```c
+// Kernel/semaphores/semaphore.c
+#define ACQUIRE(lock_ptr) \
+    while (__atomic_exchange_n((lock_ptr), (uint8_t)1, __ATOMIC_ACQUIRE)) { }
+#define RELEASE(lock_ptr) \
+    __atomic_store_n((lock_ptr), (uint8_t)0, __ATOMIC_RELEASE)
+
+int semWait(Semaphore sem) {
+    if (!sem) return -1;
+    ACQUIRE(&sem->lock);
+    sem->value--;
+    int mustBlock = (sem->value < 0);
+    if (mustBlock) {
+        int16_t currentPID = getCurrentPID();
+        setCurrentBlocked();
+        enqueue(sem->blockedQueue, (void*)(intptr_t)currentPID);
+    }
+    RELEASE(&sem->lock);
+    if (mustBlock) forceSchedulerCall();
+    return 0;
+}
 ```
 
-Modo interactivo con EOF:
+#### Función principal del context switch
 
-```text
-[SHELL] > cat
-hola      <Enter> ⇢ no se ve el eco, pero cat ya lo recibió
-hola
-<Ctrl+D>  ⇢ cat termina
+Los procesos viven en `processTable[MAX_PROCESSES]`, indexados por PID para
+acceso O(1). Una `readyQueue` FIFO guarda los PIDs listos. El "nivel de
+prioridad" es la cantidad de quantums que el scheduler le entrega al proceso
+cuando lo despacha: un proceso de prioridad 3 corre tres ticks antes de ceder.
+
+```c
+// Kernel/process_contextswitch/scheduler.c
+uint64_t schedule(uint64_t prevRSP) {
+    timer_handler();
+    if (!schedulerEnabled) return prevRSP;
+    if (!currentProcess) {
+        pid_t nextPid = getNextPID();
+        currentProcess = processTable[nextPid];
+        setState(currentProcess, RUNNING);
+        resetQuantums(currentProcess);
+        useQuantum(currentProcess);
+        return (uint64_t) getRSP(currentProcess);
+    }
+    setRSP(currentProcess, (uint64_t *) prevRSP);
+
+    if (getState(currentProcess) == RUNNING) {
+        if (hasQuantums(currentProcess)) {
+            useQuantum(currentProcess);
+            return prevRSP;
+        }
+        setState(currentProcess, READY);
+        enqueue(readyQueue, (void *)(intptr_t) getPID(currentProcess));
+    }
+    pid_t nextPid = getNextPID();
+    currentProcess = processTable[nextPid];
+    setState(currentProcess, RUNNING);
+    resetQuantums(currentProcess);
+    useQuantum(currentProcess);
+    return (uint64_t) getRSP(currentProcess);
+}
 ```
 
-#### Foreground / background
+#### Terminación de procesos y reaping
 
-```text
-[SHELL] > loop 2 &
-Hola del PID 3
-[SHELL] > ps
-... PID 3 corriendo en background ...
-[SHELL] > kill 3
+Cada proceso tiene un `terminated` (semáforo que postea cuando el proceso
+muere) y un `childTerminated` que el padre usa para enterarse de la muerte de
+algún hijo. `terminateProcess` cierra fds, marca al proceso como ZOMBIE,
+postea ambos semáforos y transfiere los huérfanos a `init` (que vive en un
+loop de `wait_any`). El shell llama a `sys_reap_zombies` entre prompts para
+limpiar los procesos en background que hayan terminado.
+
+```c
+// Kernel/process_contextswitch/scheduler.c
+int terminateProcess(pid_t pid) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    if (isUnkillable(pid)) return -1;
+    Process process = processTable[pid];
+    if (!process) return -1;
+
+    pid_t   ppid   = getPPID(process);
+    Process parent = (ppid >= 0 && ppid < MAX_PROCESSES) ? processTable[ppid] : 0;
+    if (!parent) return -1;
+
+    closeFdsOf(pid);
+    foregroundSet[pid] = 0;
+    notifyTermination(process, parent, pid);
+    transferOrphanChildren(process);
+
+    if (currentProcess && getPID(currentProcess) == pid) forceSchedulerCall();
+    return 0;
+}
 ```
 
-`Ctrl+C` sobre el primer `loop` (sin `&`) lo termina al instante; sobre el
-mismo `loop &` no hace nada (no está en foreground).
+#### Buddy con árbol
 
-#### Scheduler / prioridades
+El Buddy System se implementa con un pool estático de `BuddyNode`. Cada nodo
+representa un sub-bloque potencia de 2 del pool y se materializa cuando hace
+falta partir un bloque más grande. Al fusionar buddies, los nodos hijos van a
+una free-list interna para reciclarse.
 
-```text
-[SHELL] > test_prio 100000
-== Misma prioridad ==
-  PID X termino  (los tres en orden similar)
-== Prioridades distintas ==
-  PID Y termino  (en orden HIGH > MED > LOW)
-test_prio OK
+```c
+// Kernel/memory/memoryManagerBuddy.c
+static int findAndAllocate(int nodeIdx, uint8_t requiredOrder) {
+    if (nodeIdx < 0 || nodeIdx >= nodeCount) return -1;
+    BuddyNode *node = &nodes[nodeIdx];
+
+    if (node->order < requiredOrder) return -1;
+
+    int exactResult = tryAllocateExactSize(nodeIdx, requiredOrder);
+    if (exactResult != -1) return exactResult;
+
+    if (node->leftChild == -1)
+        return trySplitAndAllocate(nodeIdx, requiredOrder);
+
+    int result = findAndAllocate(node->leftChild, requiredOrder);
+    if (result != -1) { updateNodeStatus(nodeIdx); return result; }
+
+    result = findAndAllocate(node->rightChild, requiredOrder);
+    if (result != -1) updateNodeStatus(nodeIdx);
+    return result;
+}
 ```
 
-#### Memory manager
+---
 
-```text
-[SHELL] > mem
-Memoria (bytes):
-  total    : 268435456
-  ocupada  : 81920
-  libre    : 268353536
-  fragments: 1
-[SHELL] > test_mm 65536
-test_mm: inicio ...
-iter 0 OK: 14 bloques, 65535 bytes
-...
-test_mm OK
-```
+**Autor:** Octavio Roberts Sanchez — Grupo 18
 
-Re-compilando con `make buddy`, el mismo `test_mm` ejercita el Buddy.
-
-#### Sincronización
-
-```text
-[SHELL] > test_sync 5000
-test_sync: ronda SIN semaforo (race esperada)...
-sin semaforo: valor final = 4983 (esperado: distinto de 0 (race))
-test_sync: ronda CON semaforo (esperado: 0)...
-con semaforo: valor final = 0 (esperado: 0)
-test_sync OK
-```
-
-#### MVar (lectores/escritores)
-
-`mvar <W> <R>` crea `W` escritores que ponen letras `'A'`, `'B'`, ... en una
-variable compartida, y `R` lectores que las consumen. El comando *termina al
-instante*: los writers/readers quedan corriendo y los adopta init. Para
-detenerlos hay que matarlos con `kill <pid>`. Ejemplo:
-
-```text
-[SHELL] > mvar 2 1                  # un solo lector consume A y B alternando
-ABABABABAB...
-[SHELL] > ps                        # los mvar_w / mvar_r siguen corriendo
-[SHELL] > nice <pid_de_B> 4         # priorizo a B → ahora B aparece más
-ABABBBABBBABBBAB...
-[SHELL] > kill <pid_de_B>           # mato a B → sólo aparece A
-AAAAAA...
-```
-
-## Tests de la cátedra
-
-| Test | Parámetros | Nota |
-| --- | --- | --- |
-| `test_mm` | `<max_memory>` | Ciclo "infinito" (8 rondas por ejecución) que pide/libera bloques aleatorios y chequea que no se solapen. Pasa con free-list y con buddy. |
-| `test_proc` | `<max_procs>` | Crea, bloquea, desbloquea y mata procesos `endlessLoop` aleatoriamente. Sólo imprime errores. |
-| `test_prio` | `<max_value>` | Tres procesos que cuentan hasta `max_value` con prio igual y luego con prio distinta. |
-| `test_sync` | `<n_iter>` | Dos pares de procesos incrementan/decrementan una variable global, con y sin semáforos. |
-
-Todos se pueden correr en foreground (`test_mm 65536`) o background
-(`test_mm 65536 &`).
-
-## Requerimientos parcialmente cubiertos / limitaciones
-
-- **Eco interactivo de comandos pipeables**: `cat`, `wc` y `filter`, cuando se
-  ejecutan sin pipeline, no muestran lo tipeado por pantalla porque el sistema
-  no tiene un layer TTY. Esto es por diseño (todo I/O va por pipes y no hay
-  modo "canónico"); el shell sí ecoa lo tipeado.
-- **Pipelines de más de 2 etapas**: la consigna pide soportar `p1 | p2`. El
-  shell limita el pipeline a 2 etapas para mantenerse fiel a ese
-  requerimiento.
-- **Render del MVar con colores**: el ejemplo de la consigna sugiere
-  identificar a cada lector con un color. Como el terminal no soporta
-  escape sequences ANSI, los lectores imprimen sólo el carácter consumido;
-  se puede identificar la actividad de cada lector mirando `ps` y la
-  frecuencia de aparición de cada letra escritora.
-- **Persistencia de procesos en background al cerrar el shell**: el shell
-  reapeas zombies entre prompts (`sys_reap_zombies`), pero los procesos
-  todavía corriendo en background son hijos del shell. Si el shell muere
-  son adoptados por init, que los reapea al terminar.
-
-## Citas de fragmentos de código y uso de IA
-
-- El esqueleto inicial (Bootloader Pure64, Toolchain, Image, _loader.c,
-  prepareStack y manejo de IDT) viene del repositorio
-  [x64BareBones](https://bitbucket.org/RowDaBoat/x64barebones/) provisto por
-  la cátedra y del TP1 de Arquitectura de Computadoras del grupo.
-- Drivers de video y teclado, mapeo de scancode set 1, RTC, speaker y
-  manejo de excepciones fueron adaptados del TP1 de Arquitectura.
-- Se utilizó IA (Claude/ChatGPT) puntualmente para:
-  - Discutir el diseño del manejo de Ctrl+D y la propagación de EOF a través
-    de pipes (filtro de `'\0'` en `readFdOf`, criterio de marcar EOF sólo
-    en procesos cuyo STDIN sea el pipe del teclado).
-  - Revisar el manejo de anidación de IF en ISRs (helpers
-    `_save_flags_cli` / `_restore_flags`).
-  - Generar el esqueleto del Buddy System (algoritmo de buddies XOR).
-- Las decisiones de arquitectura, partición de responsabilidades
-  (consola/terminal en userland) y la implementación final son del grupo.
+**Base:** x64BareBones (Rodrigo Rearden, Augusto Nizzo McIntosh) sobre
+Pure64.

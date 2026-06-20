@@ -1,3 +1,6 @@
+/*
+ * point.h — TAD `point2D` con operaciones aritméticas básicas y distancia.
+ */
 #ifndef POINT_H
 #define POINT_H
 #include <stdint.h>

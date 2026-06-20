@@ -1,3 +1,11 @@
+/*
+ * test_sync.c — Race condition con y sin semáforos.
+ *
+ * Pares de procesos suman/restan sobre una variable global el mismo número de
+ * veces; con semáforo nombrado (`SEM_ID`) el resultado tiene que dar 0, sin
+ * semáforo se observa el efecto de la race. La función `slowInc` inserta un
+ * yield ocasional para hacer la race más probable.
+ */
 #include <tests.h>
 #include <syscalls.h>
 #include <cstandard.h>
@@ -9,7 +17,7 @@ int64_t global; // shared memory
 void slowInc(int64_t *p, int64_t inc) {
   uint64_t aux = *p;
   if ((randomNext() % 100) < 30)
-    sys_yield(); // This makes the race condition highly probable
+    sys_yield(); 
   aux += inc;
   *p = aux;
 }
@@ -53,8 +61,11 @@ static int my_process_inc(int argc, char **argv) {
 }
 
 int test_sync_command(int argc, char **argv) { //{test_sync, n_procesos, n_iter, use_sem}
-  if (argc != 4)
-    return -1;
+  if (argc != 4 || stringToInt(argv[1]) <= 0 || stringToInt(argv[2]) <= 0 || (stringToInt(argv[3]) != 0 && stringToInt(argv[3]) != 1)) {
+    sys_write(STDERR, "Usage: test_sync <n_procesos> <n_iter> <use_sem>\n", sizeof("Usage: test_sync <n_procesos> <n_iter> <use_sem>\n"));
+    sys_exit();
+    return 0;
+  }
 
   int64_t n_procesos = stringToInt(argv[1]);
   if (n_procesos <= 0)

@@ -1,3 +1,8 @@
+; libasm.asm — Primitivas en ensamblador llamables desde C:
+;   - cpuVendor: CPUID con EAX=0 para obtener el vendor string.
+;   - getTime / getDate: lectura del RTC vía puertos CMOS (0x70, 0x71).
+;   - readPort / writePort: in/out de 8 bits sobre cualquier puerto.
+
 GLOBAL cpuVendor, getTime, getDate, readPort, writePort
 
 section .text

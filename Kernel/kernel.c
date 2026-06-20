@@ -1,3 +1,16 @@
+/*
+ * kernel.c — Entry point en C del kernel.
+ *
+ * `main` corre dentro de la pila del stub del bootloader. Inicializa, en orden:
+ *   1. el memory manager (mem_init sobre MEM_HEAP_START/SIZE);
+ *   2. el scheduler (registrando `initProcessEntry` como PID 1);
+ *   3. la IDT (`load_idt` habilita IRQs con _sti al final);
+ *   4. el scheduler (lo "destraba" para que el próximo timer-tick haga el primer
+ *      context switch).
+ *
+ * Después entra en un `_hlt` infinito: cualquier IRQ pisará el hlt y disparará
+ * el scheduling. El proceso init arma el pipe del teclado y lanza al shell.
+ */
 #include <stdint.h>
 #include <string.h>
 #include <lib.h>

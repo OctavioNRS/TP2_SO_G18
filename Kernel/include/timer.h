@@ -1,3 +1,6 @@
+/*
+ * timer.h — Contador de ticks/ms del PIT (IRQ0) y `sleep` por espera activa.
+ */
 #ifndef _TIMER_H_
 #define _TIMER_H_
 #include <stdint.h>

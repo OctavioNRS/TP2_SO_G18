@@ -1,3 +1,7 @@
+; interrupts.asm — Stubs en ensamblador para IRQs, excepciones, syscalls y
+; primitivas de control de interrupciones (_cli/_sti/_hlt). Cada handler pushea
+; el estado, llama al despachador en C correspondiente y restaura con iretq.
+; `_syscall` entra desde `int 0x80` y reenvía a `syscallDispatcher`.
 
 GLOBAL _cli
 GLOBAL _sti

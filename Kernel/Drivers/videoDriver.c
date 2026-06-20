@@ -1,3 +1,11 @@
+/*
+ * videoDriver.c — Driver de video VESA con framebuffer lineal.
+ *
+ * Lee la estructura VBE Mode Info que dejó Pure64 en memoria fija para conocer
+ * resolución, BPP y dirección del framebuffer. Expone primitivas para dibujar
+ * píxel, rectángulo, círculo, glifo (font 8x16 en .rodata) y string. `scrollUp`
+ * hace memcpy hacia arriba y rellena la franja inferior con el color de fondo.
+ */
 #include <videoDriver.h>
 #include <stdint.h>
 

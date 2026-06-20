@@ -1,3 +1,6 @@
+/*
+ * exceptions.c — Handlers de excepciones de CPU (división por cero y opcode inválido).
+ */
 #include <videoDriver.h>
 #include <timer.h>
 #include <registers.h>

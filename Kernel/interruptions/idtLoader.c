@@ -1,3 +1,10 @@
+/*
+ * idtLoader.c — Construcción y carga de la IDT (Interrupt Descriptor Table).
+ *
+ * Llena los gates para IRQ0/1 (timer, teclado), las excepciones \#0 y \#6, la
+ * syscall en 0x80 e initializea los PICs (master/slave) para remapear las IRQs
+ * a 0x20+. `load_idt` carga el IDTR y habilita interrupciones con `_sti`.
+ */
 #include <stdint.h>
 #include <idtLoader.h>
 #include <defs.h>

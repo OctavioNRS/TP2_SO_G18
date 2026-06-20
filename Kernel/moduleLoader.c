@@ -1,3 +1,11 @@
+/*
+ * moduleLoader.c — Copia los módulos empaquetados a sus direcciones de destino.
+ *
+ * El bootloader Pure64 deja contiguos en RAM los binarios del módulo de código
+ * y del módulo de datos (cada uno precedido por un uint32 con su tamaño). Esta
+ * rutina los lee del payload y los memcopia a las direcciones fijas que el
+ * kernel espera (sampleCodeModuleAddress = 0x400000, etc.).
+ */
 #include <stdint.h>
 #include <lib.h>
 #include <moduleLoader.h>

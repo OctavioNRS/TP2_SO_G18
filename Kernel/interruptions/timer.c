@@ -1,3 +1,10 @@
+/*
+ * timer.c — IRQ0 (Programmable Interval Timer).
+ *
+ * Cada tick incrementa el contador de milisegundos del kernel y delega al
+ * scheduler para hacer el context switch si corresponde. Expone `sleep` (espera
+ * activa basada en el contador) y `milliseconds_elapsed` para userland.
+ */
 #include <timer.h>
 #include <videoDriver.h>
 #include <interrupts.h>

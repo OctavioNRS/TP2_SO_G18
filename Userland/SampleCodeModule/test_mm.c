@@ -1,3 +1,11 @@
+/*
+ * test_mm.c — Stress del memory manager.
+ *
+ * Aloca bloques de tamaño random hasta llegar al límite que pasó el usuario,
+ * escribe un patrón conocido en cada uno, verifica que no se corrompieron
+ * (sin solapes ni overflow entre bloques) y los libera en bloque. Repite en
+ * loop reportando OK por iteración.
+ */
 #include <tests.h>
 #include <syscalls.h>
 #include <cstandard.h>

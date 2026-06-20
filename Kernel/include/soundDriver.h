@@ -1,3 +1,6 @@
+/*
+ * soundDriver.h — Reproducción por PC Speaker (PIT canal 2 + puerto 0x61).
+ */
 #ifndef _SOUND_DRIVER_H_
 #define _SOUND_DRIVER_H_
 

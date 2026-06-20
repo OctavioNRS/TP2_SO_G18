@@ -1,3 +1,10 @@
+/*
+ * memoryManager.h — Interfaz del administrador de memoria.
+ *
+ * Esta API la implementan dos archivos intercambiables a build-time: el
+ * free-list de `memory/memoryManager.c` (default) o el buddy de
+ * `memory/memoryManagerBuddy.c` (cuando `USE_BUDDY` está definido, `make buddy`).
+ */
 #ifndef MEMORY_MANAGER_H
 #define MEMORY_MANAGER_H
 

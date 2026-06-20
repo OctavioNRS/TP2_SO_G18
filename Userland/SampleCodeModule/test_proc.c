@@ -1,3 +1,10 @@
+/*
+ * test_proc.c — Stress del scheduler con creación, bloqueo y kill aleatorios.
+ *
+ * Crea hasta `max_procs` procesos en loop infinito; randomiza acciones (block,
+ * unblock, kill) sobre ellos hasta que todos están muertos. Verifica que el
+ * scheduler maneje correctamente las transiciones de estado y la limpieza.
+ */
 #include <tests.h>
 #include <syscalls.h>
 #include <cstandard.h>

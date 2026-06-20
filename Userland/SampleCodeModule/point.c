@@ -1,3 +1,6 @@
+/*
+ * point.c — Constructor liviano para el TAD `point2D` (x, y).
+ */
 #include <point.h>
 #include <stdint.h>
 

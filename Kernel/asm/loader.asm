@@ -1,3 +1,8 @@
+; loader.asm — Entry point del kernel (símbolo `loader`).
+; Pure64 salta acá tras cargar la imagen. `loader` setea el stack en
+; `initializeKernelBinary` (que copia módulos y limpia BSS) y salta a `main`
+; del kernel.
+
 global loader
 extern main
 extern initializeKernelBinary

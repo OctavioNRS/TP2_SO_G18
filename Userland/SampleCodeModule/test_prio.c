@@ -1,3 +1,11 @@
+/*
+ * test_prio.c — Verifica el efecto de las prioridades del scheduler.
+ *
+ * Spawnea 3 procesos con prioridades 1, 2 y 3 que cuentan hasta el mismo
+ * `max_value`. Como la prioridad determina los quantums por turno, los de
+ * prioridad alta terminan antes; el orden de finalización confirma el
+ * scheduling round-robin con quantums proporcionales.
+ */
 #include <tests.h>
 #include <syscalls.h>
 #include <cstandard.h>

@@ -1,3 +1,7 @@
+/*
+ * cstandard.h — Mini libc del userland: printf/scanf básicos, conversiones,
+ * helpers de char y un PRNG corto. La libc del sistema NO está disponible.
+ */
 #ifndef CSTANDARD_H
 #define CSTANDARD_H
 #include <syscalls.h>

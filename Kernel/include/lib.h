@@ -1,3 +1,7 @@
+/*
+ * lib.h — Utilidades estándar mínimas para el kernel (no hay libc).
+ * Incluye mem*, str*, I/O de puertos x86 y wrappers de CPUID/RTC.
+ */
 #ifndef LIB_H
 #define LIB_H
 #include <stdint.h>

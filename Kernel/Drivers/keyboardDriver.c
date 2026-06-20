@@ -1,3 +1,12 @@
+/*
+ * keyboardDriver.c — Driver del teclado PS/2 vía IRQ1.
+ *
+ * Traduce scancodes a ASCII (mapeo US QWERTY con/sin shift), maneja CapsLock y
+ * teclas modificadoras (Shift/Ctrl), y deposita cada byte en el pipe del teclado
+ * (FileAccess registrado por `initializeKeyboardDriver`). Captura Ctrl+C para
+ * matar el foreground set, Ctrl+D para marcar EOF en los reads bloqueados, y F6
+ * (Print Screen) para tomar un snapshot de los registros.
+ */
 #include <stdint.h>
 #include <lib.h>
 #include <keyboardDriver.h>

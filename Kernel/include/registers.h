@@ -1,3 +1,10 @@
+/*
+ * registers.h — Snapshot del estado de CPU (rax..r15, RIP, RFLAGS, CS, SS, RSP).
+ *
+ * `saveRegisterSnapshot` se llama desde el ISR del teclado cuando se recibe F6
+ * (SNAPSHOT_SCANCODE 0x40). `printSnapshot` lo imprime después por el comando
+ * `registers`.
+ */
 #ifndef REGISTERS_H
 #define REGISTERS_H
 #include <stdint.h>

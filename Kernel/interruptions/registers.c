@@ -1,3 +1,11 @@
+/*
+ * registers.c — Snapshot de registros disparado con F6 (Print Screen).
+ *
+ * El ISR del teclado llama a `saveRegisterSnapshot()` cuando detecta el
+ * scancode F6: copia rax..r15, rsp, rip y RFLAGS desde la pila del ISR
+ * (capturados en ensamblador) a un buffer estático. `printSnapshot()` los
+ * imprime después cuando el comando `registers` se ejecuta.
+ */
 #include <registers.h>
 #include <scheduler.h>
 #include <keyboardDriver.h>

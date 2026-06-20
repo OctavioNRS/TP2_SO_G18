@@ -1,3 +1,11 @@
+/*
+ * cstandard.c — Mini libc del userland.
+ *
+ * Implementa `printf`/`scanf` con formato básico (%d, %c, %s, %%), `putChar`,
+ * `getChar`, `puts`, conversiones `numToString`/`stringToInt`/`hexStringToInt`,
+ * helpers de char (`isLetter`, `isDigit`, `toUpper`, `isPrintableAscii`...),
+ * `memcpy` y un PRNG de 16 bits para usos triviales (mvar, tests).
+ */
 #include <cstandard.h>
 #include <stdarg.h>
 
