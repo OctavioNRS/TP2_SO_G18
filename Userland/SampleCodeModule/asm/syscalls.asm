@@ -14,6 +14,7 @@ GLOBAL sys_exit, sys_unblock
 GLOBAL sys_sem_open, sys_sem_close, sys_sem_wait, sys_sem_post
 GLOBAL sys_pipe, sys_close, sys_dup, sys_create_process_with_fds, sys_foreground, sys_reopen, sys_scroll_up
 GLOBAL sys_reap_zombies
+GLOBAL sys_get_max_processes, sys_get_processes_count
 section .text
 
 %macro syscall 1
@@ -114,6 +115,9 @@ sys_scroll_up:
 	syscall 41
 sys_reap_zombies:
 	syscall 42
-
+sys_get_max_processes:
+	syscall 43
+sys_get_processes_count:
+	syscall 44
 test_invalid_opcode:
 	int 0x06

@@ -35,6 +35,8 @@ typedef struct {
 void initializeScheduler(ProcessEntryPoint initProcessEntry);
 void enableScheduler(void);
 
+int getProcessesCount(void);
+
 pid_t startNewProcess(ProcessEntryPoint entryPoint, char *name,
                       uint8_t priorityLevel, int argc, char **argv);
 

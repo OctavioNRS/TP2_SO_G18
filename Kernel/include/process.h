@@ -63,6 +63,7 @@ pid_t     getPPID(Process process);
 void      setPPID(Process process, pid_t ppid);
 
 char     *getProcessName(Process process);
+int       getMaxProcesses(void);
 
 State     getState(Process process);
 void      setState(Process process, State newState);

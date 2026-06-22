@@ -32,10 +32,15 @@ int test_proc_command(int argc, char **argv) {
     }
 
     int64_t parsed = stringToInt(argv[1]);
+    int64_t limit = sys_get_max_processes() - sys_get_processes_count();
     if (parsed <= 0) {
         sys_write(STDERR, "test_proc: invalido\n", 20);
         sys_exit();
         return 0;
+    }
+    if(parsed > limit) {
+        sys_write(STDERR, "test_proc: max_processes demasiado grande, ajustado para el maximo disponible\n", 79);
+        parsed = limit;
     }
     uint64_t max_processes = (uint64_t)parsed;
 

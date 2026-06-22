@@ -75,6 +75,8 @@ int64_t  sys_unblock(int16_t pid);
 int64_t  sys_yield();
 int64_t  sys_waitpid(int16_t pid);
 uint64_t sys_ps(ProcessInfo *buffer, int max);
+uint64_t sys_get_max_processes();
+uint64_t sys_get_processes_count();
 void     sys_exit();
 
 int64_t  sys_sem_open(char *name, int initialValue);

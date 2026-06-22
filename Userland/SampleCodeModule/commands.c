@@ -276,7 +276,8 @@ static int wcCommand(int argc, char **argv) {
     while (1) {
         int n = (int) sys_read(STDIN, buf, sizeof(buf));
         if (n <= 0) break;
-        sys_write(STDOUT, buf, n);
+        // sys_write(STDOUT, buf, n); COMPORTAMIENTO NO DESEADO AL HACER PIPE CON WC, SE MUESTRA EL TEXTO LEIDO. 
+        // Ahora no se muestra lo que escribe el usuario, pero funciona correctamente
         for (int i = 0; i < n; i++) {
             chars++;
             char c = buf[i];

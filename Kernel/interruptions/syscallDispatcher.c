@@ -191,6 +191,16 @@ uint64_t sysReapZombies(SYSCALL_ARGS) {
     return 0;
 }
 
+uint64_t sysGetMaxProcesses(SYSCALL_ARGS) {
+    (void)arg1; (void)arg2; (void)arg3; (void)arg4; (void)arg5; (void)arg6;
+    return (uint64_t)getMaxProcesses();
+}
+
+uint64_t sysGetProcessesCount(SYSCALL_ARGS) {
+    (void)arg1; (void)arg2; (void)arg3; (void)arg4; (void)arg5; (void)arg6;
+    return (uint64_t)getProcessesCount();
+}
+
 static syscallFunction syscalls[] = {
     sysRead, sysWrite, sysDrawRect, sysDrawCircle, sysDrawChar, sysScrWidth, sysScrHeight,
     sysBg, sysVideoAux, sysRender, sysSleep, sysDrawStr, sysGetKey, sysPlaySound, sysDate,
@@ -200,7 +210,7 @@ static syscallFunction syscalls[] = {
     sysExit, sysUnblock,
     sysSemOpen, sysSemClose, sysSemWait, sysSemPost,
     sysPipe, sysClose, sysDup, sysCreateProcessFds, sysForeground, sysReopen, sysScrollUp,
-    sysReapZombies
+    sysReapZombies, sysGetMaxProcesses, sysGetProcessesCount
 };
 
 #define SYSCALL_COUNT (sizeof(syscalls) / sizeof(syscalls[0]))

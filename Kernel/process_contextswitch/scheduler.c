@@ -37,6 +37,14 @@ static int idleProcessEntry(int argc, char **argv) {
     return 0;
 }
 
+int getProcessesCount(void) {
+    int count = 0;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (processTable[i] != 0) count++;
+    }
+    return count;
+}
+
 static void prepareStack(Process process) {
     uint64_t *sp = getRSP(process);
     uint64_t stackPointerValue = (uint64_t) sp;

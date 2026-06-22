@@ -195,6 +195,54 @@ static void runLine(char *line) {
         return;
     }
 
+    // Caso con nStages == 2 (no puede ser mayor, lo chequea splitPipeline)
+    int pipeFds[2];
+    if (sys_pipe(pipeFds) < 0) {
+        sys_write(STDERR, "shell: cannot create pipe\n", 26);
+        if (childStdin >= 0) sys_close(childStdin);
+        return;
+    }
+
+    int closeOnFirst[2];
+    int nCloseFirst = 0;
+    closeOnFirst[nCloseFirst++] = pipeFds[0];
+    if (childStdin >= 0 && childStdin != firstStdin)
+        closeOnFirst[nCloseFirst++] = childStdin;
+    int pid1 = runStage(stages[0], firstStdin, pipeFds[1], background,
+                        closeOnFirst, nCloseFirst);
+
+    if (pid1 < 0) {
+        sys_close(pipeFds[0]);
+        sys_close(pipeFds[1]);
+        if (childStdin >= 0) sys_close(childStdin);
+        return;
+    }
+
+    int closeOnSecond[2];
+    int nCloseSecond = 0;
+    closeOnSecond[nCloseSecond++] = pipeFds[1];
+    if (childStdin >= 0)
+        closeOnSecond[nCloseSecond++] = childStdin;
+    int pid2 = runStage(stages[1], pipeFds[0], STDOUT, background,
+                        closeOnSecond, nCloseSecond);
+
+    sys_close(pipeFds[0]);
+    sys_close(pipeFds[1]);
+
+    if (pid2 < 0) {
+        sys_kill((int16_t) pid1);
+        if (!background) sys_waitpid((int16_t) pid1);
+        if (childStdin >= 0) sys_close(childStdin);
+        return;
+    }
+
+    if (!background) {
+        sys_waitpid((int16_t) pid1);
+        sys_waitpid((int16_t) pid2);
+        putChar('\n');
+    }
+
+    if (childStdin >= 0) sys_close(childStdin);
 }
 
 

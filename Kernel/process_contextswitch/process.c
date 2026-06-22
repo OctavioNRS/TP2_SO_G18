@@ -39,6 +39,8 @@ int comparePIDs(void *e1, void *e2) {
     return (int)pid1 - (int)pid2;
 }
 
+int getMaxProcesses(void) { return MAX_PROCESSES; }
+
 static void copyProcessName(Process process, const char *name) {
     int i = 0;
     if (name != 0)
